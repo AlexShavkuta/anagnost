@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Tutor</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <header class="toolbar">
+      <button id="open-btn" class="primary">Open PDF</button>
+      <select id="recent" title="Recent documents"><option value="">Recent…</option></select>
+      <span id="doc-title" class="title">No document</span>
+      <span class="spacer"></span>
+      <button id="prev-btn" title="Previous page">‹</button>
+      <input id="page-input" type="number" min="1" value="1" />
+      <span id="page-count">/ 0</span>
+      <button id="next-btn" title="Next page">›</button>
+      <button id="zoom-out" title="Zoom out">−</button>
+      <span id="zoom-label">100%</span>
+      <button id="zoom-in" title="Zoom in">+</button>
+      <span class="spacer"></span>
+      <button id="map-btn" disabled>Build map</button>
+      <button id="settings-btn" title="Settings">Settings</button>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <nav class="tabs">
+          <button data-tab="map" class="active">Map</button>
+          <button data-tab="notes">Notes</button>
+        </nav>
+        <section id="tab-map" class="tab-body">
+          <div id="map-progress" hidden>
+            <div class="bar"><div id="map-bar"></div></div>
+            <small id="map-status"></small>
+          </div>
+          <details id="overview-box" hidden open>
+            <summary>Overview</summary>
+            <div id="overview" class="md"></div>
+          </details>
+          <div id="study-progress" class="muted"></div>
+          <ul id="tree" class="tree"></ul>
+          <p id="map-empty" class="muted">Open a PDF to see its structure.</p>
+        </section>
+        <section id="tab-notes" class="tab-body" hidden>
+          <form id="note-form">
+            <textarea id="note-input" rows="3" placeholder="Write a note for this page…"></textarea>
+            <button type="submit">Add note</button>
+          </form>
+          <ul id="notes" class="notes"></ul>
+        </section>
+      </aside>
+
+      <section id="viewer" class="viewer">
+        <div id="pages" class="pdfViewer"></div>
+        <div id="viewer-empty" class="empty">
+          <h2>PDF Tutor</h2>
+          <p>Open a PDF to start. Build its map to get section summaries, key concepts and review questions.</p>
+        </div>
+      </section>
+
+      <aside class="chat">
+        <div class="chat-head">
+          <strong>Tutor</strong>
+          <small id="chat-context" class="muted"></small>
+          <button id="chat-clear" class="link">Clear</button>
+        </div>
+        <div id="messages" class="messages"></div>
+        <div class="quick">
+          <button id="explain-btn" disabled>Explain selection</button>
+          <button id="page-btn" disabled>Explain this page</button>
+          <button id="quiz-btn" disabled>Quiz me</button>
+          <button id="note-sel-btn" disabled>Selection → note</button>
+        </div>
+        <form id="chat-form">
+          <textarea id="chat-input" rows="3" placeholder="Ask about what you're reading…  (Enter to send)"></textarea>
+          <button type="submit" id="send-btn" class="primary">Send</button>
+        </form>
+      </aside>
+    </main>
+
+    <dialog id="settings">
+      <form method="dialog" id="settings-form">
+        <h2>Settings</h2>
+        <label>
+          Anthropic API key <small id="key-status" class="muted"></small>
+          <input id="api-key" type="password" placeholder="sk-ant-…  (stored in the macOS Keychain)" autocomplete="off" />
+        </label>
+        <label>
+          Model
+          <input id="model" type="text" />
+        </label>
+        <h3>Connect Claude Code</h3>
+        <p class="muted">PDF Tutor runs an MCP server while it's open. Run this once in a terminal:</p>
+        <pre id="mcp-cmd"></pre>
+        <button type="button" id="copy-mcp">Copy command</button>
+        <p id="mcp-error" class="error" hidden></p>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button value="save" id="save-settings" class="primary">Save</button>
+        </menu>
+      </form>
+    </dialog>
+  </body>
+</html>
