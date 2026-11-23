@@ -1,0 +1,173 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "pdfjs-dist/web/pdf_viewer.css";
+
+/* Dark mode follows the system: main.tsx toggles .dark on <html>. */
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn/ui tokens. Neutral surfaces in two steps (chrome around the editor, the editor
+   itself), one warm accent used only for state: active view, focus, progress, primary action. */
+:root {
+  --radius: 0.375rem;
+
+  --background: oklch(1 0 0);              /* editor */
+  --foreground: oklch(0.205 0 0);
+  --chrome: oklch(0.982 0 0);              /* title bar, activity bar, side bars, status bar */
+  --viewer: oklch(0.93 0 0);               /* behind the PDF pages */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.205 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.55 0.13 42);          /* clay */
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.955 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.955 0 0);
+  --muted-foreground: oklch(0.48 0 0);
+  --accent: oklch(0.94 0 0);               /* hover */
+  --accent-foreground: oklch(0.205 0 0);
+  --selected: oklch(0.55 0.13 42 / 0.11);  /* current row */
+  --destructive: oklch(0.55 0.2 27);
+  --success: oklch(0.55 0.13 150);
+  /* coss extras: foreground variants for tinted badges, toasts and alerts */
+  --destructive-foreground: oklch(0.5 0.19 27);
+  --success-foreground: oklch(0.45 0.12 150);
+  --info: oklch(0.6 0.13 245);
+  --info-foreground: oklch(0.47 0.13 245);
+  --warning: oklch(0.75 0.15 75);
+  --warning-foreground: oklch(0.52 0.12 65);
+  --border: oklch(0.91 0 0);
+  --input: oklch(0.86 0 0);
+  --ring: oklch(0.55 0.13 42);
+}
+
+.dark {
+  --background: oklch(0.235 0 0);
+  --foreground: oklch(0.87 0 0);
+  --chrome: oklch(0.205 0 0);
+  --viewer: oklch(0.17 0 0);
+  --card: oklch(0.25 0 0);
+  --card-foreground: oklch(0.87 0 0);
+  --popover: oklch(0.26 0 0);
+  --popover-foreground: oklch(0.87 0 0);
+  --primary: oklch(0.72 0.12 45);
+  --primary-foreground: oklch(0.2 0 0);
+  --secondary: oklch(0.29 0 0);
+  --secondary-foreground: oklch(0.87 0 0);
+  --muted: oklch(0.29 0 0);
+  --muted-foreground: oklch(0.68 0 0);
+  --accent: oklch(0.3 0 0);
+  --accent-foreground: oklch(0.92 0 0);
+  --selected: oklch(0.72 0.12 45 / 0.15);
+  --destructive: oklch(0.7 0.17 25);
+  --success: oklch(0.74 0.13 150);
+  --destructive-foreground: oklch(0.74 0.15 25);
+  --success-foreground: oklch(0.78 0.12 150);
+  --info: oklch(0.66 0.12 245);
+  --info-foreground: oklch(0.76 0.1 245);
+  --warning: oklch(0.78 0.14 75);
+  --warning-foreground: oklch(0.82 0.12 75);
+  --border: oklch(0.3 0 0);
+  --input: oklch(0.36 0 0);
+  --ring: oklch(0.72 0.12 45);
+}
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --font-heading: var(--font-sans);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-chrome: var(--chrome);
+  --color-viewer: var(--viewer);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-selected: var(--selected);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  /* coss toast "upsert" replay animations */
+  --animate-toast-success-odd: toast-success-odd 0.32s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-success-even: toast-success-even 0.32s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-error-odd: toast-error-odd 0.28s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-error-even: toast-error-even 0.28s cubic-bezier(0.5, 1, 0.89, 1);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@keyframes toast-success-odd { 0% { scale: 1; } 30% { scale: 1.025; } 60% { scale: 0.99; } 100% { scale: 1; } }
+@keyframes toast-success-even { 0% { scale: 1; } 30% { scale: 1.025; } 60% { scale: 0.99; } 100% { scale: 1; } }
+@keyframes toast-error-odd { 0% { translate: 0 0; } 25% { translate: -3px 0; } 50% { translate: 3px 0; } 75% { translate: -3px 0; } 100% { translate: 0 0; } }
+@keyframes toast-error-even { 0% { translate: 0 0; } 25% { translate: -3px 0; } 50% { translate: 3px 0; } 75% { translate: -3px 0; } 100% { translate: 0 0; } }
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html, body, #root { height: 100%; overflow: hidden; }
+  body {
+    @apply bg-chrome text-foreground font-sans antialiased;
+    font-size: 13px;
+    line-height: 1.4;
+    /* A desktop app: chrome isn't selectable, content opts back in with .select-text */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  button { cursor: default; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--foreground) 18%, transparent);
+    border: 3px solid transparent; background-clip: padding-box; border-radius: 6px;
+  }
+  ::-webkit-scrollbar-corner { background: transparent; }
+}
+
+/* ---------- PDF pages (pdf.js) ---------- */
+.pdfViewer { padding: 20px 16px 40px; }
+.pdfViewer .page {
+  position: relative; margin: 0 auto 16px; background: #fff;
+  border: none; box-sizing: content-box;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.12);
+}
+.pdfViewer .page canvas { display: block; }
+.pdfViewer .textLayer { user-select: text; -webkit-user-select: text; }
+
+/* ---------- rendered Markdown (tutor answers, notes, overview) ---------- */
+.md { overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol { margin: 0 0 0.6em; }
+.md ul { list-style: disc; padding-left: 1.3em; }
+.md ol { list-style: decimal; padding-left: 1.4em; }
+.md li { margin: 0.15em 0; }
+.md h1, .md h2, .md h3, .md h4 { font-size: 1em; font-weight: 600; margin: 0.9em 0 0.3em; }
+.md strong { font-weight: 600; }
+.md a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.md code { font: 0.92em var(--font-mono); background: var(--muted); padding: 0.1em 0.3em; border-radius: 3px; }
+.md pre { background: var(--muted); padding: 8px 10px; border-radius: 4px; overflow: auto; margin: 0 0 0.6em; }
+.md pre code { background: none; padding: 0; }
+.md blockquote { margin: 0 0 0.6em; padding-left: 10px; border-left: 2px solid var(--input); color: var(--muted-foreground); }
+.md table { border-collapse: collapse; margin: 0 0 0.6em; font-size: 0.95em; }
+.md th, .md td { border: 1px solid var(--input); padding: 3px 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

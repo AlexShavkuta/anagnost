@@ -15,8 +15,10 @@
         "title": "PDF Tutor",
         "width": 1440,
         "height": 920,
-        "minWidth": 1000,
-        "minHeight": 600
+        "minWidth": 900,
+        "minHeight": 560,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
@@ -26,6 +28,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

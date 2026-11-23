@@ -60,6 +60,13 @@ pub fn open(path: &Path) -> Result<Connection> {
         );
         "#,
     )?;
+    // v2: pages recognized with OCR.
+    let has_ocr: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'ocr'")?
+        .exists([])?;
+    if !has_ocr {
+        conn.execute_batch("ALTER TABLE pages ADD COLUMN ocr INTEGER NOT NULL DEFAULT 0;")?;
+    }
     Ok(conn)
 }
 
@@ -286,6 +293,63 @@ pub fn page_text(conn: &Connection, doc_id: &str, start: i64, end: i64) -> Resul
     Ok(out)
 }
 
+/// A page with fewer characters than this has no usable text layer (likely a scan).
+const MIN_PAGE_CHARS: i64 = 20;
+
+#[derive(Serialize, Clone, Debug)]
+pub struct TextStatus {
+    /// Pages with no usable text that haven't been recognized yet.
+    pub missing: Vec<i64>,
+    /// Pages whose text came from OCR.
+    pub recognized: Vec<i64>,
+}
+
+pub fn text_status(conn: &Connection, doc_id: &str) -> Result<TextStatus> {
+    let mut st = conn.prepare(
+        "SELECT page FROM pages WHERE doc_id = ?1 AND ocr = 0 AND length(trim(text)) < ?2 ORDER BY page",
+    )?;
+    let missing = st
+        .query_map(params![doc_id, MIN_PAGE_CHARS], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    let mut st = conn.prepare("SELECT page FROM pages WHERE doc_id = ?1 AND ocr = 1 ORDER BY page")?;
+    let recognized = st.query_map([doc_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(TextStatus { missing, recognized })
+}
+
+pub fn set_ocr_text(conn: &Connection, doc_id: &str, page: i64, text: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE pages SET text = ?3, ocr = 1 WHERE doc_id = ?1 AND page = ?2",
+        params![doc_id, page, text],
+    )?;
+    Ok(())
+}
+
+/// After OCR: a scanned PDF without bookmarks was split into page chunks by word count,
+/// with no words, so it ended up as one big section. Re-split it now that it has text,
+/// unless the user already has map data or progress on those sections.
+pub fn rechunk_if_generated(conn: &mut Connection, doc_id: &str) -> Result<bool> {
+    let secs = sections(conn, doc_id)?;
+    let generated = !secs.is_empty()
+        && secs.iter().all(|s| {
+            s.depth == 0
+                && s.summary.is_none()
+                && !s.studied
+                && (s.title.starts_with("Page ") || s.title.starts_with("Pages "))
+        });
+    if !generated {
+        return Ok(false);
+    }
+    let pages: Vec<String> = {
+        let mut st = conn.prepare("SELECT text FROM pages WHERE doc_id = ?1 ORDER BY page")?;
+        st.query_map([doc_id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+    };
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM sections WHERE doc_id = ?1", [doc_id])?;
+    insert_chunks(&tx, doc_id, &pages)?;
+    tx.commit()?;
+    Ok(true)
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct SearchHit {
     pub page: i64,
@@ -299,10 +363,9 @@ pub fn search(conn: &Connection, doc_id: &str, query: &str) -> Result<Vec<Search
     let mut hits = Vec::new();
     for row in rows {
         let (page, text) = row?;
-        let lower = text.to_lowercase();
-        if let Some(pos) = lower.find(&q) {
+        if let Some((pos, len)) = find_ci(&text, &q) {
             let start = floor_char(&text, pos.saturating_sub(120));
-            let end = floor_char(&text, (pos + q.len() + 120).min(text.len()));
+            let end = floor_char(&text, (pos + len + 120).min(text.len()));
             hits.push(SearchHit { page, snippet: text[start..end].replace('\n', " ") });
             if hits.len() >= 30 {
                 break;
@@ -310,6 +373,30 @@ pub fn search(conn: &Connection, doc_id: &str, query: &str) -> Result<Vec<Search
         }
     }
     Ok(hits)
+}
+
+/// Case-insensitive find that returns a byte range in `text` itself (lowercasing can change
+/// byte lengths, so offsets into a lowercased copy don't map back).
+fn find_ci(text: &str, lower_query: &str) -> Option<(usize, usize)> {
+    if lower_query.is_empty() {
+        return None;
+    }
+    for (i, _) in text.char_indices() {
+        let mut lowered = String::new();
+        for (j, c) in text[i..].char_indices() {
+            lowered.extend(c.to_lowercase());
+            if lowered.len() >= lower_query.len() {
+                if lowered == lower_query {
+                    return Some((i, j + c.len_utf8()));
+                }
+                break;
+            }
+            if !lower_query.starts_with(&lowered) {
+                break;
+            }
+        }
+    }
+    None
 }
 
 fn floor_char(s: &str, mut i: usize) -> usize {
@@ -505,5 +592,46 @@ mod tests {
         assert_eq!(s.summary.as_deref(), Some("sum"));
         assert_eq!(s.concepts.len(), 1);
         assert!(!save_section_analysis(&c, "other-doc", id, "x", &[], &[]).unwrap());
+    }
+
+    #[test]
+    fn scanned_pdf_is_rechunked_after_ocr() {
+        let mut c = mem();
+        let pages: Vec<String> = (0..7).map(|_| String::new()).collect();
+        ingest(&mut c, "d", "/x.pdf", "Doc", &pages, &[]).unwrap();
+        assert_eq!(sections(&c, "d").unwrap().len(), 1, "no words: one section for the whole scan");
+        assert_eq!(text_status(&c, "d").unwrap().missing, (1..=7).collect::<Vec<_>>());
+
+        let page = "word ".repeat(1500);
+        for p in 1..=7 {
+            set_ocr_text(&c, "d", p, &page).unwrap();
+        }
+        let st = text_status(&c, "d").unwrap();
+        assert!(st.missing.is_empty());
+        assert_eq!(st.recognized, (1..=7).collect::<Vec<_>>());
+        assert!(rechunk_if_generated(&mut c, "d").unwrap());
+        let ranges: Vec<_> = sections(&c, "d").unwrap().iter().map(|s| (s.start_page, s.end_page)).collect();
+        assert_eq!(ranges, vec![(1, 3), (4, 6), (7, 7)]);
+    }
+
+    #[test]
+    fn rechunk_keeps_outline_sections() {
+        let mut c = mem();
+        let pages: Vec<String> = (0..4).map(|_| String::new()).collect();
+        let outline = vec![item("One", Some(1), vec![]), item("Two", Some(3), vec![])];
+        ingest(&mut c, "d", "/x.pdf", "Doc", &pages, &outline).unwrap();
+        assert!(!rechunk_if_generated(&mut c, "d").unwrap());
+        assert_eq!(sections(&c, "d").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn case_insensitive_find_maps_back_to_original_text() {
+        // "İ" lowercases to two chars, so offsets in a lowercased copy would be wrong.
+        let text = "İstanbul and Ünïcode Straße";
+        let (pos, len) = find_ci(text, "straße").unwrap();
+        assert_eq!(&text[pos..pos + len], "Straße");
+        let (pos, len) = find_ci(text, "ünïcode").unwrap();
+        assert_eq!(&text[pos..pos + len], "Ünïcode");
+        assert!(find_ci(text, "missing").is_none());
     }
 }

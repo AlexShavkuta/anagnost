@@ -175,10 +175,14 @@ fn call_tool(state: &AppState, name: &str, args: &Value) -> Result<String> {
     match name {
         "get_status" => {
             let view = state.view.lock().unwrap().clone();
-            let (doc, secs) = state.with_db(|c| Ok((db::get_document(c, &doc_id)?, db::sections(c, &doc_id)?)))?;
+            let (doc, secs, text) = state.with_db(|c| {
+                Ok((db::get_document(c, &doc_id)?, db::sections(c, &doc_id)?, db::text_status(c, &doc_id)?))
+            })?;
             let doc = doc.ok_or_else(|| anyhow!("document not found"))?;
             let mapped = secs.iter().filter(|s| s.summary.is_some()).count();
             Ok(pretty(json!({
+                "pages_without_text": text.missing.len(),
+                "pages_recognized_with_ocr": text.recognized.len(),
                 "title": doc.title,
                 "path": doc.path,
                 "page_count": doc.page_count,
