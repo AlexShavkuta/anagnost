@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, BookOpenCheck, CornerDownLeft, FileText, FolderOpen, ListTree, NotebookPen, PanelLeft, PanelRight, ScanText, Search, Settings, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, BookOpenCheck, CornerDownLeft, FileText, FolderOpen, ListTree, NotebookPen, PanelLeft, PanelRight, RefreshCw, ScanText, Search, Settings, Sparkles } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import {
   Command,
@@ -69,6 +69,7 @@ export function CommandPalette() {
     { value: "left", label: "Toggle side bar", icon: <PanelLeft />, hint: "⌘B", run: () => app.setLeftOpen(!useApp.getState().leftOpen) },
     { value: "right", label: "Toggle tutor", icon: <PanelRight />, hint: "⌥⌘B", run: () => app.setRightOpen(!useApp.getState().rightOpen) },
     { value: "settings", label: "Settings", icon: <Settings />, hint: "⌘,", run: () => app.openSettings() },
+    { value: "update", label: "Check for updates", icon: <RefreshCw />, run: () => { app.openSettings("updates"); app.checkForUpdates(); } },
   );
   groups.push({ value: "Commands", items: commands });
   const others = recent.filter((d) => d.id !== doc?.id);

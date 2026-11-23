@@ -29,6 +29,10 @@ Optional: text recognition for scanned PDFs installs itself from Settings → Te
 
 The app is built on your Mac and signed for it alone, so macOS opens it without warnings. A copy sent to another Mac would be blocked by Gatekeeper until it's notarized with an Apple Developer account.
 
+### Updating
+
+Settings → Updates (or the status bar's **Update available**) pulls the new commits into the clone the app was built from, rebuilds it, and restarts the app. From a terminal, the same thing is `git pull && npm run install-app` in that folder.
+
 ## Develop
 
 ```bash
@@ -43,7 +47,7 @@ In **Settings → Tutor and map**, choose which account answers:
 - **Anthropic API key**: calls the Claude API directly. The default model is `claude-opus-5-5`.
 - **Cursor API key**: runs your Cursor plan through Cursor's CLI, `cursor-agent`. Create a key in the Cursor dashboard under Integrations. Leave the model empty for Cursor's default, or name one your plan offers. Install the CLI with `curl https://cursor.com/install -fsS | bash` if you don't have it.
 
-Keys are stored in the macOS Keychain. `ANTHROPIC_API_KEY` and `CURSOR_API_KEY` in the environment work as fallbacks.
+Keys are kept in `keys.json` in the app's data folder (`~/Library/Application Support/com.alex.pdftutor/`), readable only by your user (mode 600). They used to be in the Keychain; because the app is built locally and only ad-hoc signed, every rebuild made the Keychain ask for your password again. Keys saved there by older versions are moved over once. `ANTHROPIC_API_KEY` and `CURSOR_API_KEY` in the environment work as fallbacks.
 
 `cursor-agent` is a coding agent, so PDF Tutor keeps it read-only. It runs in ask mode, in an empty temporary folder that's deleted afterwards, with a workspace config that denies shell commands and file writes, and never with `--force`. The key is passed in the environment, so it doesn't appear in the process list.
 
@@ -99,7 +103,9 @@ src-tauri/src/
   mcp.rs              MCP server (Streamable HTTP, JSON responses)
   llm.rs, cursor.rs   model provider: Claude API, or Cursor via cursor-agent
   ocr.rs              runs Qianfan-OCR in llama-server, on demand
-  state.rs            shared state, Keychain API key
+  state.rs            shared state
+  secrets.rs          API keys (private file)
+  update.rs           Update button: git pull + rebuild
 ```
 
 ## Limits

@@ -72,6 +72,17 @@ export interface OcrInfo {
   downloaded: boolean;
   status: OcrStatus;
 }
+export interface UpdateInfo {
+  commit: string;
+  commit_date: string;
+  source: string;
+  unavailable: string | null;
+}
+export interface UpdateCheck {
+  behind: number;
+  commits: { sha: string; message: string }[];
+}
+export type UpdateStatus = { state: "idle" } | { state: "running"; step: string } | { state: "error"; message: string };
 export interface ChatMsg {
   role: "user" | "assistant";
   content: string;
@@ -94,6 +105,10 @@ export const api = {
   ocrFinish: (docId: string) => invoke<boolean>("ocr_finish", { docId }),
   ocrStop: () => invoke("ocr_stop"),
   ocrSetup: () => invoke("ocr_setup"),
+  updateInfo: () => invoke<UpdateInfo>("update_info"),
+  updateStatus: () => invoke<UpdateStatus>("update_status"),
+  checkUpdate: () => invoke<UpdateCheck>("check_update"),
+  startUpdate: () => invoke("start_update"),
   buildMap: (docId: string, redo: boolean) => invoke("build_map", { docId, redo }),
   ask: (a: { docId: string; sectionId: number | null; page: number; messages: ChatMsg[]; onDelta: Channel<string> }) =>
     invoke<string>("ask", a),
@@ -117,13 +132,13 @@ export const api = {
 export function providerProblem(s: Settings | null): { title: string; text: string; focus: string } | null {
   if (!s) return null;
   if (s.provider === "anthropic" && !s.has_api_key) {
-    return { title: "Connect Claude", text: "The tutor uses your Anthropic API key, stored in the macOS Keychain. Or switch to your Cursor key.", focus: "api-key" };
+    return { title: "Connect Claude", text: "The tutor uses your Anthropic API key, kept on this Mac. Or switch to your Cursor key.", focus: "api-key" };
   }
   if (s.provider === "cursor" && !s.cursor_agent) {
     return { title: "Install Cursor's CLI", text: "The tutor runs through cursor-agent, which wasn't found on this Mac.", focus: "cursor-path" };
   }
   if (s.provider === "cursor" && !s.has_cursor_key) {
-    return { title: "Connect Cursor", text: "Add your Cursor API key (Cursor dashboard → Integrations). It's stored in the macOS Keychain.", focus: "cursor-key" };
+    return { title: "Connect Cursor", text: "Add your Cursor API key (Cursor dashboard → Integrations). It's kept on this Mac.", focus: "cursor-key" };
   }
   return null;
 }

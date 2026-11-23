@@ -1,4 +1,4 @@
-import { Check, Cpu, Plug, Sparkles, Square } from "lucide-react";
+import { ArrowUpCircle, Check, Cpu, Plug, Sparkles, Square } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/lib/api";
 import { useApp } from "@/lib/store";
@@ -14,6 +14,7 @@ export function StatusBar() {
   const ocrServer = useApp((s) => s.ocrServer);
   const pdf = useApp((s) => s.pdf);
   const page = useApp((s) => s.currentPage);
+  const update = useApp((s) => s.update);
   const { openSettings, stopOcr } = useApp.getState();
 
   let text = task?.text ?? null;
@@ -50,6 +51,17 @@ export function StatusBar() {
         )}
       </div>
       <div className="flex items-stretch">
+        {update.status.state === "running" ? (
+          <button className={button} onClick={() => openSettings("updates")} title="Updating PDF Tutor">
+            <Spinner className="size-3.5" />
+            {update.status.step}…
+          </button>
+        ) : (update.check?.behind ?? 0) > 0 || update.status.state === "error" ? (
+          <button className={cn(button, "text-primary hover:text-primary")} onClick={() => openSettings("updates")} title="See what's new">
+            <ArrowUpCircle className="size-3.5" />
+            {update.status.state === "error" ? "Update needs attention" : "Update available"}
+          </button>
+        ) : null}
         {pdf && <span className={item}>Page {page} of {pdf.numPages}</span>}
         {ocrServer.state === "ready" && (
           <button className={button} onClick={() => api.ocrStop()} title="Qianfan-OCR is in memory (~5 GB) and unloads after 5 idle minutes. Click to unload it now.">

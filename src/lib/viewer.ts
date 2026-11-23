@@ -1,62 +1,114 @@
-// Imperative pdf.js page rendering: placeholders for every page, canvases and text layers
-// rendered lazily as pages come near the viewport.
+// Imperative pdf.js page rendering: a sized placeholder for every page, canvases and text
+// layers rendered as pages come near the viewport and dropped when they're far away.
 
 import { pdfjs, type PDFDocumentProxy } from "./pdf";
 
+type Entry = { scale: number; done: boolean; task?: { cancel(): void } };
+
+/** How far outside the viewport pages are rendered ahead, and how far before they're freed. */
+const RENDER_MARGIN = "1200px 0px";
+const KEEP_MARGIN = "4000px 0px";
+
 export class PageRenderer {
-  private rendered = new Map<number, { scale: number; task?: { cancel(): void } }>();
-  private observer: IntersectionObserver;
+  private rendered = new Map<number, Entry>();
+  private near: IntersectionObserver;
+  private far: IntersectionObserver;
+  private pdf: PDFDocumentProxy | null = null;
+  private scale = 1;
+  private divs: HTMLElement[] = [];
 
   constructor(
     private root: HTMLElement,
     private container: HTMLElement,
   ) {
-    this.observer = new IntersectionObserver(
+    this.near = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) if (e.isIntersecting) this.renderPage(Number((e.target as HTMLElement).dataset.page));
+        for (const e of entries) {
+          const n = Number((e.target as HTMLElement).dataset.page);
+          if (e.isIntersecting) this.renderPage(n);
+          else this.cancelPending(n); // scrolled past before it finished: don't hold up the queue
+        }
       },
-      { root, rootMargin: "800px 0px" },
+      { root, rootMargin: RENDER_MARGIN },
+    );
+    this.far = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (!e.isIntersecting) this.release(Number((e.target as HTMLElement).dataset.page));
+      },
+      { root, rootMargin: KEEP_MARGIN },
     );
   }
-
-  private pdf: PDFDocumentProxy | null = null;
-  private scale = 1;
 
   async layout(pdf: PDFDocumentProxy, scale: number) {
     this.pdf = pdf;
     this.scale = scale;
-    this.observer.disconnect();
+    // Every page's real size up front, so nothing shifts when pages render.
+    const sizes = await Promise.all(
+      Array.from({ length: pdf.numPages }, (_, i) => pdf.getPage(i + 1).then((p) => p.getViewport({ scale }))),
+    );
+    if (this.pdf !== pdf || this.scale !== scale) return;
+    this.near.disconnect();
+    this.far.disconnect();
     for (const r of this.rendered.values()) r.task?.cancel();
     this.rendered.clear();
-    this.container.replaceChildren();
-    // Size every placeholder from page 1; each page corrects its own size when it renders.
-    const vp = (await pdf.getPage(1)).getViewport({ scale });
-    if (this.pdf !== pdf || this.scale !== scale) return;
     const frag = document.createDocumentFragment();
-    for (let i = 1; i <= pdf.numPages; i++) {
+    this.divs = sizes.map((vp, i) => {
       const div = document.createElement("div");
       div.className = "page";
-      div.dataset.page = String(i);
+      div.dataset.page = String(i + 1);
       div.style.width = `${vp.width}px`;
       div.style.height = `${vp.height}px`;
       frag.appendChild(div);
+      return div;
+    });
+    this.container.replaceChildren(frag);
+    for (const div of this.divs) {
+      this.near.observe(div);
+      this.far.observe(div);
     }
-    this.container.appendChild(frag);
-    for (const div of this.container.children) this.observer.observe(div);
   }
 
-  pageElement(n: number) {
-    return this.container.querySelector<HTMLElement>(`.page[data-page="${n}"]`);
+  pageElement(n: number): HTMLElement | null {
+    return this.divs[n - 1] ?? null;
   }
 
-  /** The page under the top third of the viewport. */
+  /** Jump to a page without animating through the pages in between; render it first. */
+  show(n: number) {
+    const div = this.pageElement(n);
+    if (!div) return;
+    this.renderPage(n);
+    this.root.scrollTop = div.offsetTop - 12;
+  }
+
+  /** The page under the top third of the viewport (binary search; pages are in order). */
   visiblePage(): number | null {
-    const mid = this.root.getBoundingClientRect().top + this.root.clientHeight / 3;
-    for (const div of this.container.children as HTMLCollectionOf<HTMLElement>) {
-      const r = div.getBoundingClientRect();
-      if (r.top <= mid && r.bottom >= mid) return Number(div.dataset.page);
+    if (this.divs.length === 0) return null;
+    const y = this.root.scrollTop + this.root.clientHeight / 3;
+    let lo = 0;
+    let hi = this.divs.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.divs[mid].offsetTop <= y) lo = mid;
+      else hi = mid - 1;
     }
-    return null;
+    return lo + 1;
+  }
+
+  private cancelPending(n: number) {
+    const r = this.rendered.get(n);
+    if (r && !r.done) {
+      r.task?.cancel();
+      this.rendered.delete(n);
+    }
+  }
+
+  /** Free a far-away page's canvas; it renders again when it comes back. */
+  private release(n: number) {
+    const r = this.rendered.get(n);
+    if (!r) return;
+    r.task?.cancel();
+    this.rendered.delete(n);
+    this.pageElement(n)?.replaceChildren();
   }
 
   private async renderPage(n: number) {
@@ -66,12 +118,13 @@ export class PageRenderer {
     const prev = this.rendered.get(n);
     if (prev && prev.scale === scale) return;
     prev?.task?.cancel();
-    const entry: { scale: number; task?: { cancel(): void } } = { scale };
+    const entry: Entry = { scale, done: false };
     this.rendered.set(n, entry);
 
     const div = this.pageElement(n);
     if (!div) return;
     const page = await pdf.getPage(n);
+    if (this.rendered.get(n) !== entry) return;
     const vp = page.getViewport({ scale });
     const ratio = window.devicePixelRatio || 1;
     const canvas = document.createElement("canvas");
@@ -81,8 +134,6 @@ export class PageRenderer {
     canvas.style.height = `${vp.height}px`;
     const textDiv = document.createElement("div");
     textDiv.className = "textLayer";
-    div.style.width = `${vp.width}px`;
-    div.style.height = `${vp.height}px`;
     div.style.setProperty("--scale-factor", String(scale));
 
     const task = page.render({ canvas, viewport: vp, transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : undefined });
@@ -90,15 +141,17 @@ export class PageRenderer {
     try {
       await task.promise;
     } catch {
-      return; // cancelled by a zoom change or a new document
+      return; // cancelled: zoom change, new document, or scrolled away
     }
     if (this.rendered.get(n) !== entry) return;
+    entry.done = true;
     div.replaceChildren(canvas, textDiv);
     await new pdfjs.TextLayer({ textContentSource: await page.getTextContent(), container: textDiv, viewport: vp }).render();
   }
 
   destroy() {
-    this.observer.disconnect();
+    this.near.disconnect();
+    this.far.disconnect();
     for (const r of this.rendered.values()) r.task?.cancel();
   }
 }

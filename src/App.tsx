@@ -13,7 +13,7 @@ import { SideBar } from "@/components/workbench/SideBar";
 import { StatusBar } from "@/components/workbench/StatusBar";
 import { TitleBar } from "@/components/workbench/TitleBar";
 import { Tutor } from "@/components/workbench/Tutor";
-import type { OcrStatus } from "@/lib/api";
+import type { OcrStatus, UpdateStatus } from "@/lib/api";
 import { useApp } from "@/lib/store";
 import { useZoom } from "@/lib/zoom";
 
@@ -32,8 +32,14 @@ function useBackendEvents() {
       }),
       listen<number>("goto-page", (e) => app.goToPage(e.payload)),
       listen<OcrStatus>("ocr-status", (e) => app.setOcrServer(e.payload)),
+      listen<UpdateStatus>("update-status", (e) => app.setUpdateStatus(e.payload)),
     ];
-    return () => subs.forEach((p) => p.then((un) => un()));
+    // One quiet check per launch; the status bar offers the update if there is one.
+    const t = setTimeout(() => app.checkForUpdates(true), 4000);
+    return () => {
+      clearTimeout(t);
+      subs.forEach((p) => p.then((un) => un()));
+    };
   }, []);
 }
 

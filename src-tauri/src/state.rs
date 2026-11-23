@@ -10,9 +10,6 @@ use serde::Serialize;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
-const KEYRING_SERVICE: &str = "pdf-tutor";
-const KEYRING_USER: &str = "anthropic-api-key";
-const KEYRING_CURSOR: &str = "cursor-api-key";
 
 /// Which model provider runs the tutor and the map.
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, Debug)]
@@ -38,6 +35,8 @@ pub struct AppState {
     pub mcp_token: String,
     pub mcp_error: Mutex<Option<String>>,
     pub ocr: std::sync::Arc<crate::ocr::Ocr>,
+    pub updater: crate::update::Updater,
+    pub secrets: crate::secrets::Secrets,
 }
 
 impl AppState {
@@ -60,37 +59,20 @@ impl AppState {
         let _ = self.app.emit("doc-changed", doc_id.to_string());
     }
 
-    fn secret(user: &str) -> Option<String> {
-        keyring::Entry::new(KEYRING_SERVICE, user)
-            .ok()
-            .and_then(|e| e.get_password().ok())
-            .filter(|k| !k.is_empty())
-    }
-
-    fn set_secret(user: &str, key: &str) -> Result<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, user)?;
-        if key.is_empty() {
-            let _ = entry.delete_credential();
-        } else {
-            entry.set_password(key)?;
-        }
-        Ok(())
-    }
-
     pub fn api_key(&self) -> Option<String> {
-        Self::secret(KEYRING_USER).or_else(|| std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.is_empty()))
+        self.secrets.get(crate::secrets::ANTHROPIC).or_else(|| std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.is_empty()))
     }
 
     pub fn set_api_key(&self, key: &str) -> Result<()> {
-        Self::set_secret(KEYRING_USER, key)
+        self.secrets.set(crate::secrets::ANTHROPIC, key)
     }
 
     pub fn cursor_key(&self) -> Option<String> {
-        Self::secret(KEYRING_CURSOR).or_else(|| std::env::var("CURSOR_API_KEY").ok().filter(|k| !k.is_empty()))
+        self.secrets.get(crate::secrets::CURSOR).or_else(|| std::env::var("CURSOR_API_KEY").ok().filter(|k| !k.is_empty()))
     }
 
     pub fn set_cursor_key(&self, key: &str) -> Result<()> {
-        Self::set_secret(KEYRING_CURSOR, key)
+        self.secrets.set(crate::secrets::CURSOR, key)
     }
 
     pub fn setting(&self, key: &str) -> Option<String> {

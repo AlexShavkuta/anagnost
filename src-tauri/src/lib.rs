@@ -4,8 +4,10 @@ mod db;
 mod llm;
 mod mapping;
 mod mcp;
+mod secrets;
 mod ocr;
 mod state;
+mod update;
 
 use claude::Request;
 use serde::{Deserialize, Serialize};
@@ -141,6 +143,28 @@ fn ocr_finish(state: S, doc_id: String) -> CmdResult<bool> {
     let rechunked = state.with_db(|c| db::rechunk_if_generated(c, &doc_id)).map_err(err)?;
     state.notify_changed(&doc_id);
     Ok(rechunked)
+}
+
+// ---------- updates ----------
+
+#[tauri::command]
+fn update_info(state: S) -> update::Info {
+    state.updater.info()
+}
+
+#[tauri::command]
+fn update_status(state: S) -> update::Status {
+    state.updater.status()
+}
+
+#[tauri::command]
+async fn check_update(state: S<'_>) -> CmdResult<update::Check> {
+    state.updater.check().await.map_err(err)
+}
+
+#[tauri::command]
+fn start_update(state: S) -> CmdResult<()> {
+    state.updater.start().map_err(err)
 }
 
 /// Install llama.cpp if needed, then download and load the model.
@@ -350,6 +374,8 @@ pub fn run() {
                 mcp_token: token,
                 mcp_error: Mutex::new(None),
                 ocr: ocr::Ocr::new(app.handle().clone(), dir.clone()),
+                updater: update::Updater::new(app.handle().clone(), &dir),
+                secrets: secrets::Secrets::open(&dir)?,
             });
             app.manage(state.clone());
 
@@ -381,6 +407,10 @@ pub fn run() {
             ocr_page,
             ocr_finish,
             ocr_setup,
+            update_info,
+            update_status,
+            check_update,
+            start_update,
             ocr_stop,
             get_settings,
             save_settings,

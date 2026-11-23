@@ -193,7 +193,7 @@ function Viewer() {
     let live = true;
     renderer.current!.layout(pdf, scale).then(() => {
       if (!live) return;
-      renderer.current!.pageElement(page)?.scrollIntoView({ block: "start" });
+      renderer.current!.show(page);
       setLaidOut((n) => n + 1);
     });
     return () => {
@@ -203,15 +203,21 @@ function Viewer() {
 
   useEffect(() => {
     if (!scrollTo || !laidOut) return;
-    renderer.current?.pageElement(scrollTo.page)?.scrollIntoView({ behavior: scrollTo.smooth ? "smooth" : "auto", block: "start" });
+    // Jump straight there: animating through the pages in between queues their renders first.
+    renderer.current?.show(scrollTo.page);
   }, [scrollTo?.seq, laidOut]);
 
   // Track the page in view and the text selected in the PDF.
   useEffect(() => {
     const el = root.current!;
+    let frame = 0;
     const onScroll = () => {
-      const p = renderer.current?.visiblePage();
-      if (p) useApp.getState().setCurrentPage(p);
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const p = renderer.current?.visiblePage();
+        if (p) useApp.getState().setCurrentPage(p);
+      });
     };
     const onSelection = () => {
       const sel = window.getSelection();
@@ -225,6 +231,7 @@ function Viewer() {
     el.addEventListener("scroll", onScroll, { passive: true });
     document.addEventListener("selectionchange", onSelection);
     return () => {
+      cancelAnimationFrame(frame);
       el.removeEventListener("scroll", onScroll);
       document.removeEventListener("selectionchange", onSelection);
     };
