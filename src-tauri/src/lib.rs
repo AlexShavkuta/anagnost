@@ -1,7 +1,10 @@
 mod claude;
+mod cursor;
 mod db;
+mod llm;
 mod mapping;
 mod mcp;
+mod ocr;
 mod state;
 
 use claude::Request;
@@ -10,7 +13,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use state::{AppState, ViewState};
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, State, ipc::Channel};
+use tauri::{Manager, RunEvent, State, ipc::Channel};
 
 const DEFAULT_MCP_PORT: u16 = 7337;
 
@@ -98,6 +101,54 @@ fn set_view(state: S, doc_id: Option<String>, page: i64, selection: Option<Strin
     Ok(())
 }
 
+#[tauri::command]
+fn search(state: S, doc_id: String, query: String) -> CmdResult<Vec<db::SearchHit>> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(vec![]);
+    }
+    state.with_db(|c| db::search(c, &doc_id, &query.to_lowercase())).map_err(err)
+}
+
+// ---------- OCR ----------
+
+fn llama_server_path(state: &AppState) -> Option<String> {
+    state.with_db(|c| db::get_setting(c, "llama_server_path")).ok().flatten()
+}
+
+#[tauri::command]
+fn text_status(state: S, doc_id: String) -> CmdResult<db::TextStatus> {
+    state.with_db(|c| db::text_status(c, &doc_id)).map_err(err)
+}
+
+#[tauri::command]
+fn ocr_info(state: S) -> ocr::Info {
+    state.ocr.info(llama_server_path(&state).as_deref())
+}
+
+/// Recognize one rendered page (base64 PNG) and store its text.
+#[tauri::command]
+async fn ocr_page(state: S<'_>, doc_id: String, page: i64, image: String) -> CmdResult<String> {
+    let path = llama_server_path(&state);
+    let text = state.ocr.recognize(path.as_deref(), &image).await.map_err(err)?;
+    state.with_db(|c| db::set_ocr_text(c, &doc_id, page, &text)).map_err(err)?;
+    Ok(text)
+}
+
+/// Called after a run of OCR: re-split generated sections and tell views to refresh.
+#[tauri::command]
+fn ocr_finish(state: S, doc_id: String) -> CmdResult<bool> {
+    let rechunked = state.with_db(|c| db::rechunk_if_generated(c, &doc_id)).map_err(err)?;
+    state.notify_changed(&doc_id);
+    Ok(rechunked)
+}
+
+#[tauri::command]
+async fn ocr_stop(state: S<'_>) -> CmdResult<()> {
+    state.ocr.stop().await;
+    Ok(())
+}
+
 // ---------- Claude ----------
 
 #[tauri::command]
@@ -122,7 +173,7 @@ async fn ask(
     messages: Vec<ChatMessage>,
     on_delta: Channel<String>,
 ) -> CmdResult<String> {
-    let claude = state.claude().map_err(err)?;
+    let claude = state.llm().map_err(err)?;
     let context = state
         .with_db(|c| {
             let doc = db::get_document(c, &doc_id)?.ok_or_else(|| anyhow::anyhow!("unknown document"))?;
@@ -189,37 +240,77 @@ fn delete_note(state: S, doc_id: String, id: i64) -> CmdResult<()> {
 
 #[derive(Serialize)]
 struct Settings {
+    provider: state::Provider,
     has_api_key: bool,
     model: String,
+    has_cursor_key: bool,
+    cursor_model: String,
+    cursor_agent_path: String,
+    /// Where cursor-agent was found, if it was.
+    cursor_agent: Option<String>,
     mcp_url: String,
     mcp_token: String,
     mcp_error: Option<String>,
+    llama_server_path: String,
 }
 
 #[tauri::command]
 fn get_settings(state: S) -> CmdResult<Settings> {
-    let model = state
-        .with_db(|c| db::get_setting(c, "model"))
-        .map_err(err)?
-        .unwrap_or_else(|| claude::DEFAULT_MODEL.into());
+    let cursor_agent_path = state.setting("cursor_agent_path").unwrap_or_default();
     Ok(Settings {
+        provider: state.provider(),
         has_api_key: state.api_key().is_some(),
-        model,
+        model: state.setting("model").unwrap_or_else(|| claude::DEFAULT_MODEL.into()),
+        has_cursor_key: state.cursor_key().is_some(),
+        cursor_model: state.setting("cursor_model").unwrap_or_default(),
+        cursor_agent: cursor::find_binary(Some(&cursor_agent_path)).map(|p| p.display().to_string()),
+        cursor_agent_path,
         mcp_url: format!("http://127.0.0.1:{}/mcp", state.mcp_port),
         mcp_token: state.mcp_token.clone(),
         mcp_error: state.mcp_error.lock().unwrap().clone(),
+        llama_server_path: llama_server_path(&state).unwrap_or_default(),
     })
 }
 
+/// Fields left as None are unchanged. An empty key string removes that key.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsUpdate {
+    provider: Option<state::Provider>,
+    api_key: Option<String>,
+    model: Option<String>,
+    cursor_api_key: Option<String>,
+    cursor_model: Option<String>,
+    cursor_agent_path: Option<String>,
+    llama_server_path: Option<String>,
+}
+
 #[tauri::command]
-fn save_settings(state: S, api_key: Option<String>, model: Option<String>) -> CmdResult<()> {
-    if let Some(k) = api_key {
+fn save_settings(state: S, update: SettingsUpdate) -> CmdResult<()> {
+    if let Some(k) = update.api_key {
         state.set_api_key(k.trim()).map_err(err)?;
     }
-    if let Some(m) = model {
-        state.with_db(|c| db::set_setting(c, "model", m.trim())).map_err(err)?;
+    if let Some(k) = update.cursor_api_key {
+        state.set_cursor_key(k.trim()).map_err(err)?;
     }
-    Ok(())
+    let provider = update.provider.map(|p| if p == state::Provider::Cursor { "cursor" } else { "anthropic" }.to_string());
+    let fields = [
+        ("provider", provider),
+        ("model", update.model),
+        ("cursor_model", update.cursor_model),
+        ("cursor_agent_path", update.cursor_agent_path),
+        ("llama_server_path", update.llama_server_path),
+    ];
+    state
+        .with_db(|c| {
+            for (key, value) in fields {
+                if let Some(v) = value {
+                    db::set_setting(c, key, v.trim())?;
+                }
+            }
+            Ok(())
+        })
+        .map_err(err)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -251,6 +342,7 @@ pub fn run() {
                 mcp_port: port,
                 mcp_token: token,
                 mcp_error: Mutex::new(None),
+                ocr: ocr::Ocr::new(app.handle().clone()),
             });
             app.manage(state.clone());
 
@@ -276,9 +368,23 @@ pub fn run() {
             add_note,
             list_notes,
             delete_note,
+            search,
+            text_status,
+            ocr_info,
+            ocr_page,
+            ocr_finish,
+            ocr_stop,
             get_settings,
             save_settings,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Don't leave the OCR model server running after the app quits.
+            if let RunEvent::Exit = event
+                && let Some(state) = app.try_state::<Arc<AppState>>()
+            {
+                state.ocr.kill_now();
+            }
+        });
 }

@@ -1,7 +1,8 @@
 //! Builds the study map: summarize leaf sections from their text, roll summaries up
 //! to parent sections, then write a whole-document overview.
 
-use crate::claude::{Claude, Request};
+use crate::claude::Request;
+use crate::llm::Llm;
 use crate::db::{self, Concept, Section};
 use crate::state::AppState;
 use anyhow::{Result, anyhow};
@@ -61,7 +62,7 @@ struct Progress {
 }
 
 pub async fn build_map(state: Arc<AppState>, doc_id: String, redo: bool) -> Result<()> {
-    let claude = state.claude()?;
+    let claude = state.llm()?;
     let (doc, sections) = state.with_db(|c| {
         let doc = db::get_document(c, &doc_id)?.ok_or_else(|| anyhow!("unknown document"))?;
         Ok((doc, db::sections(c, &doc_id)?))
@@ -151,7 +152,7 @@ pub async fn build_map(state: Arc<AppState>, doc_id: String, redo: bool) -> Resu
     Ok(())
 }
 
-async fn analyze_leaf(claude: &Claude, doc_title: &str, s: &Section, text: &str) -> Result<Analysis> {
+async fn analyze_leaf(claude: &Llm, doc_title: &str, s: &Section, text: &str) -> Result<Analysis> {
     let (text, note) = if text.len() > MAX_SECTION_CHARS {
         let mut cut = MAX_SECTION_CHARS;
         while !text.is_char_boundary(cut) {
@@ -173,7 +174,7 @@ async fn analyze_leaf(claude: &Claude, doc_title: &str, s: &Section, text: &str)
     run(claude, prompt).await
 }
 
-async fn analyze_parent(claude: &Claude, doc_title: &str, p: &Section, kids: &[Section]) -> Result<Analysis> {
+async fn analyze_parent(claude: &Llm, doc_title: &str, p: &Section, kids: &[Section]) -> Result<Analysis> {
     let mut parts = String::new();
     for k in kids {
         parts.push_str(&format!(
@@ -196,7 +197,7 @@ async fn analyze_parent(claude: &Claude, doc_title: &str, p: &Section, kids: &[S
     run(claude, prompt).await
 }
 
-async fn overview(claude: &Claude, title: &str, pages: i64, top: &[Section]) -> Result<String> {
+async fn overview(claude: &Llm, title: &str, pages: i64, top: &[Section]) -> Result<String> {
     let mut parts = String::new();
     for s in top {
         parts.push_str(&format!(
@@ -226,7 +227,7 @@ async fn overview(claude: &Claude, title: &str, pages: i64, top: &[Section]) -> 
         .await
 }
 
-async fn run(claude: &Claude, prompt: String) -> Result<Analysis> {
+async fn run(claude: &Llm, prompt: String) -> Result<Analysis> {
     let text = claude
         .complete(&Request {
             system: vec![SYSTEM.into()],
@@ -236,5 +237,5 @@ async fn run(claude: &Claude, prompt: String) -> Result<Analysis> {
             schema: Some(analysis_schema()),
         })
         .await?;
-    serde_json::from_str(&text).map_err(|e| anyhow!("Claude returned malformed JSON: {e}"))
+    claude.parse_json(&text)
 }
