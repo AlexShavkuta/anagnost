@@ -25,7 +25,7 @@ npm run install-app
 
 This builds the app and installs it into `/Applications` (or `~/Applications` if you can't write there). The first build takes a few minutes. Run the same command again after `git pull` to update.
 
-Optional: `brew install llama.cpp` for text recognition in scanned PDFs, and Cursor's CLI (`curl https://cursor.com/install -fsS | bash`) to run the tutor on a Cursor key.
+Optional: text recognition for scanned PDFs installs itself from Settings → Text recognition; and Cursor's CLI (`curl https://cursor.com/install -fsS | bash`) to run the tutor on a Cursor key.
 
 The app is built on your Mac and signed for it alone, so macOS opens it without warnings. A copy sent to another Mac would be blocked by Gatekeeper until it's notarized with an Apple Developer account.
 
@@ -53,7 +53,7 @@ Map building makes one model call per section, plus one per parent section and o
 
 When a PDF has pages with no text layer, the Map view offers to recognize them. PDF Tutor renders each page and sends it to [Qianfan-OCR](https://huggingface.co/baidu/Qianfan-OCR) (a 4B document model from Baidu), running locally in llama.cpp's `llama-server`. Nothing leaves your Mac.
 
-- Needs llama.cpp: `brew install llama.cpp`. The app finds `llama-server` in Homebrew's folders or your `PATH`, or you can set its path in Settings.
+- Needs llama.cpp. **Settings → Text recognition → Install and load** downloads the official macOS build (about 17 MB, from ggml-org/llama.cpp releases) into the app's data folder, then downloads and loads the model. A Homebrew copy (`brew install llama.cpp`), one on your `PATH`, or a path set in Settings works too.
 - The first run downloads the model, about 4.8 GB (`ggml-org/Qianfan-OCR-GGUF`, Q8_0), into the Hugging Face cache (`~/.cache/huggingface/hub`).
 - The app starts the server when it's needed and stops it after 5 idle minutes, or when you click *OCR model loaded* in the status bar.
 - Speed: about 20 seconds per page on an M2 Pro.

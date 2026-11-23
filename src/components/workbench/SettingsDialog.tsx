@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Progress, ProgressIndicator, ProgressTrack } from "@/components/ui/progress";
+import { Spinner } from "@/components/ui/spinner";
 import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import { api, cursorInstallLink, cursorMcpJson, type OcrInfo, type Provider } from "@/lib/api";
 import { useApp } from "@/lib/store";
@@ -101,8 +103,26 @@ export function SettingsDialog() {
     }
   }, [open, settings?.mcp_token]);
 
+  // The binary and model change during setup; refresh what's shown when it settles.
+  const ocrStep = ocrServer.state === "starting" ? ocrServer.detail : ocrServer.state;
+  useEffect(() => {
+    if (open) api.ocrInfo().then(setOcr);
+  }, [open, ocrStep]);
+
   if (!settings) return null;
   const status = ocrServer.state !== "stopped" ? ocrServer : ocr?.status;
+  const busy = status?.state === "starting";
+  // A changed but unsaved path would be ignored by the backend, so the button waits for Save.
+  const pathDirty = llama.trim() !== settings.llama_server_path.trim();
+  const setupLabel = !ocr?.binary ? "Install and load" : !ocr.downloaded ? "Download and load" : "Load model";
+
+  const setup = async () => {
+    try {
+      await api.ocrSetup();
+    } catch {
+      // The error arrives as an ocr-status event and shows in the list above.
+    }
+  };
 
   const save = async () => {
     try {
@@ -182,7 +202,7 @@ export function SettingsDialog() {
                   <Field className={field}>
                     <FieldLabel className="text-xs sm:text-xs">cursor-agent path</FieldLabel>
                     <Input id="cursor-path" spellCheck={false} placeholder="~/.local/bin/cursor-agent" value={cursorPath} onChange={(e) => setCursorPath(e.target.value)} className={input} />
-                    <FieldDescription>Leave empty to find it automatically.</FieldDescription>
+                    <FieldDescription>Optional. Leave empty to use the installed copy or Homebrew's.</FieldDescription>
                   </Field>
                 </>
               )}
@@ -229,28 +249,57 @@ export function SettingsDialog() {
                   {ocr.binary ? (
                     <Status state="ok">llama-server found at <code className={code}>{ocr.binary}</code></Status>
                   ) : (
-                    <Status state="bad">llama-server not found. Install llama.cpp with <code className={code}>brew install llama.cpp</code>, or set its path below.</Status>
+                    <Status state="bad">llama.cpp isn't installed. Install it below, or set the path to your own llama-server.</Status>
                   )}
                   {ocr.downloaded ? (
                     <Status state="ok">Model downloaded (<code className={code}>{ocr.model}</code>)</Status>
                   ) : (
-                    <Status state="todo">Model not downloaded yet. About 4.8 GB is downloaded from Hugging Face the first time you recognize text.</Status>
+                    <Status state="todo">Model not downloaded yet (about 4.8 GB from Hugging Face).</Status>
                   )}
                   {status?.state === "ready" ? (
                     <Status state="ok">Model loaded and ready</Status>
                   ) : status?.state === "error" ? (
                     <Status state="bad">Last start failed: {status.message}</Status>
-                  ) : status?.state === "starting" ? (
-                    <Status state="todo">{status.detail}{status.progress !== null ? ` ${Math.round(status.progress * 100)}%` : "…"}</Status>
-                  ) : (
+                  ) : status?.state === "starting" ? null : (
                     <Status state="todo">Model not loaded. It starts when you recognize text and unloads after 5 idle minutes.</Status>
                   )}
                 </ul>
               )}
+              {ocr && (
+                <div className="mb-3">
+                  {busy ? (
+                    <div aria-live="polite">
+                      <div className="mb-1.5 flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5"><Spinner className="size-3.5" />{status.detail}</span>
+                        {status.progress !== null && <span className="text-muted-foreground tabular-nums">{Math.round(status.progress * 100)}%</span>}
+                      </div>
+                      <Progress value={status.progress !== null ? status.progress * 100 : null} aria-label={status.detail}>
+                        <ProgressTrack className="h-1"><ProgressIndicator /></ProgressTrack>
+                      </Progress>
+                      <p className="mt-1.5 text-xs text-muted-foreground">You can close Settings; progress also shows in the status bar.</p>
+                    </div>
+                  ) : status?.state === "ready" ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => api.ocrStop()}>Unload model</Button>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <Button type="button" size="sm" disabled={pathDirty} onClick={setup}>{setupLabel}</Button>
+                      <span className="text-xs text-muted-foreground">
+                        {pathDirty
+                          ? "Save the new path first."
+                          : !ocr.binary
+                            ? "Downloads llama.cpp (about 17 MB) from GitHub and the model (4.8 GB) from Hugging Face."
+                            : !ocr.downloaded
+                              ? "Downloads the model (4.8 GB) from Hugging Face."
+                              : "Loads the model into memory now instead of on first use."}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               <Field className={field}>
                 <FieldLabel className="text-xs sm:text-xs">llama-server path</FieldLabel>
                 <Input id="llama-path" spellCheck={false} placeholder="/opt/homebrew/bin/llama-server" value={llama} onChange={(e) => setLlama(e.target.value)} className={input} />
-                <FieldDescription>Leave empty to find it automatically.</FieldDescription>
+                <FieldDescription>Optional. Leave empty to use the installed copy or Homebrew's.</FieldDescription>
               </Field>
             </section>
           </form>

@@ -143,6 +143,13 @@ fn ocr_finish(state: S, doc_id: String) -> CmdResult<bool> {
     Ok(rechunked)
 }
 
+/// Install llama.cpp if needed, then download and load the model.
+#[tauri::command]
+async fn ocr_setup(state: S<'_>) -> CmdResult<()> {
+    let path = llama_server_path(&state);
+    state.ocr.setup(path.as_deref()).await.map_err(err)
+}
+
 #[tauri::command]
 async fn ocr_stop(state: S<'_>) -> CmdResult<()> {
     state.ocr.stop().await;
@@ -342,7 +349,7 @@ pub fn run() {
                 mcp_port: port,
                 mcp_token: token,
                 mcp_error: Mutex::new(None),
-                ocr: ocr::Ocr::new(app.handle().clone()),
+                ocr: ocr::Ocr::new(app.handle().clone(), dir.clone()),
             });
             app.manage(state.clone());
 
@@ -373,6 +380,7 @@ pub fn run() {
             ocr_info,
             ocr_page,
             ocr_finish,
+            ocr_setup,
             ocr_stop,
             get_settings,
             save_settings,

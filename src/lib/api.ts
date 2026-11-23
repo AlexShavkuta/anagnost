@@ -93,6 +93,7 @@ export const api = {
   ocrPage: (docId: string, page: number, image: string) => invoke<string>("ocr_page", { docId, page, image }),
   ocrFinish: (docId: string) => invoke<boolean>("ocr_finish", { docId }),
   ocrStop: () => invoke("ocr_stop"),
+  ocrSetup: () => invoke("ocr_setup"),
   buildMap: (docId: string, redo: boolean) => invoke("build_map", { docId, redo }),
   ask: (a: { docId: string; sectionId: number | null; page: number; messages: ChatMsg[]; onDelta: Channel<string> }) =>
     invoke<string>("ask", a),
