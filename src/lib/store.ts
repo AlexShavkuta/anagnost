@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { Channel } from "@tauri-apps/api/core";
 import { ask, message, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toastManager } from "@/components/ui/toast";
-import { api, providerProblem, type ChatMsg, type Doc, type Note, type OcrStatus, type Section, type Settings, type TextStatus } from "./api";
+import { api, providerProblem, type ChatMsg, type Doc, type Note, type OcrStatus, type Section, type Settings, type TextStatus, type UpdateCheck, type UpdateInfo, type UpdateStatus } from "./api";
 import { extractOutline, extractText, loadPdf, pageImage, pdfTitle, type PDFDocumentProxy } from "./pdf";
 import { load, save } from "./persist";
 
@@ -46,6 +46,7 @@ interface State {
   mapRun: { done: number; total: number } | null;
   ocrRun: { done: number; total: number; cancelled: boolean } | null;
   ocrServer: OcrStatus;
+  update: { info: UpdateInfo | null; check: UpdateCheck | null; checking: boolean; checkError: string; status: UpdateStatus };
   expanded: Set<number>;
 }
 
@@ -79,6 +80,10 @@ interface Actions {
   addNote(text: string, source?: string): Promise<void>;
   deleteNote(id: number): Promise<void>;
   setOcrServer(s: OcrStatus): void;
+  /** Ask GitHub for new commits; `quiet` keeps errors out of the UI (the launch check). */
+  checkForUpdates(quiet?: boolean): Promise<void>;
+  startUpdate(): Promise<void>;
+  setUpdateStatus(s: UpdateStatus): void;
   setMapProgress(done: number, total: number, current: string): void;
   flash(text: string): void;
 }
@@ -131,6 +136,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   mapRun: null,
   ocrRun: null,
   ocrServer: { state: "stopped" },
+  update: { info: null, check: null, checking: false, checkError: "", status: { state: "idle" } },
   expanded: new Set(),
 
   async init() {
@@ -206,7 +212,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     set({ settings: await api.getSettings() });
   },
 
-  goToPage(n, smooth = true) {
+  goToPage(n, smooth = false) {
     const pdf = get().pdf;
     if (!pdf) return;
     const page = Math.min(pdf.numPages, Math.max(1, Math.round(n)));
@@ -363,6 +369,28 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
   },
 
+  async checkForUpdates(quiet = false) {
+    const up = () => get().update;
+    if (up().checking) return;
+    set({ update: { ...up(), checking: true, checkError: "" } });
+    try {
+      const [info, check, status] = await Promise.all([api.updateInfo(), api.checkUpdate(), api.updateStatus()]);
+      set({ update: { ...up(), info, check, status, checking: false } });
+    } catch (e) {
+      const info = await api.updateInfo().catch(() => null);
+      set({ update: { ...up(), info, checking: false, checkError: quiet ? "" : String(e) } });
+    }
+  },
+  async startUpdate() {
+    try {
+      await api.startUpdate();
+    } catch (e) {
+      set({ update: { ...get().update, status: { state: "error", message: String(e) } } });
+    }
+  },
+  setUpdateStatus(status) {
+    set({ update: { ...get().update, status } });
+  },
   setOcrServer(s) {
     set({ ocrServer: s });
   },

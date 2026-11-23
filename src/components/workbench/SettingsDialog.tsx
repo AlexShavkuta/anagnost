@@ -24,6 +24,72 @@ function Status({ state, children }: { state: "ok" | "bad" | "todo"; children: R
   );
 }
 
+function UpdatesSection() {
+  const update = useApp((s) => s.update);
+  const { checkForUpdates, startUpdate } = useApp.getState();
+  useEffect(() => {
+    if (!update.info) checkForUpdates();
+  }, []);
+  const { info, check, checking, checkError, status } = update;
+  const version = info?.commit
+    ? `${info.commit.slice(0, 7)}${info.commit_date ? ` · ${new Date(info.commit_date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}` : ""}`
+    : "unknown";
+  const behind = check?.behind ?? 0;
+
+  return (
+    <section id="updates" className="border-t py-4">
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <h3 className="font-semibold">Updates</h3>
+        <span className="font-mono text-[11px] text-muted-foreground">{version}</span>
+      </div>
+      {status.state === "running" ? (
+        <div aria-live="polite">
+          <div className="mb-1.5 flex items-center gap-1.5 text-xs"><Spinner className="size-3.5" />{status.step}…</div>
+          <p className="mt-1.5 text-xs text-muted-foreground">Keep working; PDF Tutor closes and reopens itself when the new version is built.</p>
+        </div>
+      ) : (
+        <>
+          {status.state === "error" && (
+            <pre className="mb-3 max-h-40 overflow-auto rounded-lg border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-destructive-foreground select-text">{status.message}</pre>
+          )}
+          {checkError ? (
+            <ul className="mb-3"><Status state="bad">{checkError}</Status></ul>
+          ) : checking && !check ? (
+            <p className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="size-3.5" />Checking GitHub…</p>
+          ) : check && behind === 0 ? (
+            <ul className="mb-3"><Status state="ok">You have the latest version.</Status></ul>
+          ) : check ? (
+            <div className="mb-3">
+              <p className="mb-1.5 text-xs">New in this update:</p>
+              <ul className="mb-1 list-disc pl-5 text-xs leading-relaxed text-muted-foreground">
+                {check.commits.length === 0 && <li>Maintenance changes</li>}
+                {check.commits.slice(0, 5).map((c) => <li key={c.sha}>{c.message}</li>)}
+                {check.commits.length > 5 && <li>and {check.commits.length - 5} more</li>}
+              </ul>
+            </div>
+          ) : null}
+          {info?.unavailable ? (
+            <p className="text-xs text-muted-foreground">{info.unavailable}</p>
+          ) : (
+            <div className="flex items-center gap-3">
+              {behind > 0 ? (
+                <Button type="button" size="sm" onClick={startUpdate}>Update and restart</Button>
+              ) : (
+                <Button type="button" variant="outline" size="sm" disabled={checking} onClick={() => checkForUpdates()}>Check for updates</Button>
+              )}
+              <span className="text-xs text-muted-foreground">
+                {behind > 0
+                  ? "Pulls and rebuilds from your clone (a few minutes). Tutor conversations aren't kept."
+                  : info?.source && <>Builds from <code className={code}>{info.source}</code></>}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function CopyBlock({ id, text }: { id?: string; text: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => setCopied(false), [text]);
@@ -160,7 +226,7 @@ export function SettingsDialog() {
           >
             <section className="pt-1 pb-4">
               <h3 className="mb-0.5 font-semibold">Tutor and map</h3>
-              <p className="mb-2 text-xs text-muted-foreground">Which account answers in the tutor and builds the map. Keys are stored in the macOS Keychain.</p>
+              <p className="mb-2 text-xs text-muted-foreground">Which account answers in the tutor and builds the map. Keys stay on this Mac, in a file only your user account can read.</p>
               <Choice<Provider> id="provider" label="Provider" value={provider} onChange={setProvider} options={[["anthropic", "Anthropic API key"], ["cursor", "Cursor API key"]]} />
               {provider === "anthropic" ? (
                 <>
@@ -302,6 +368,8 @@ export function SettingsDialog() {
                 <FieldDescription>Optional. Leave empty to use the installed copy or Homebrew's.</FieldDescription>
               </Field>
             </section>
+
+            <UpdatesSection />
           </form>
         </DialogPanel>
         <DialogFooter className="px-5 py-3">
