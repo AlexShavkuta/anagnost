@@ -17,13 +17,11 @@ export function StatusBar() {
   const { openSettings, stopOcr } = useApp.getState();
 
   let text = task?.text ?? null;
-  if (ocrRun) {
-    text =
-      ocrServer.state === "starting" && ocrServer.progress !== null
-        ? `Downloading Qianfan-OCR ${Math.round(ocrServer.progress * 100)}%`
-        : ocrServer.state === "starting"
-          ? "Loading Qianfan-OCR…"
-          : `Recognizing text ${Math.min(ocrRun.done + 1, ocrRun.total)}/${ocrRun.total}`;
+  if (ocrServer.state === "starting") {
+    // Installing llama.cpp, downloading or loading the model (from a run or from Settings).
+    text = ocrServer.progress !== null ? `${ocrServer.detail} ${Math.round(ocrServer.progress * 100)}%` : `${ocrServer.detail}…`;
+  } else if (ocrRun) {
+    text = `Recognizing text ${Math.min(ocrRun.done + 1, ocrRun.total)}/${ocrRun.total}`;
   }
   const mcpOk = settings && !settings.mcp_error;
 
