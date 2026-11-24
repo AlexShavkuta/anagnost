@@ -12,6 +12,21 @@ pub enum Llm {
 }
 
 impl Llm {
+    /// The Claude model in use, or None for Cursor (which picks and bills on its side).
+    pub fn claude_model(&self) -> Option<&str> {
+        match self {
+            Llm::Claude(c) => Some(c.model()),
+            Llm::Cursor(_) => None,
+        }
+    }
+
+    pub fn with_meter(self, meter: crate::claude::Meter) -> Self {
+        match self {
+            Llm::Claude(c) => Llm::Claude(c.with_meter(meter)),
+            other => other,
+        }
+    }
+
     pub async fn complete(&self, req: &Request) -> Result<String> {
         match self {
             Llm::Claude(c) => c.complete(req).await,

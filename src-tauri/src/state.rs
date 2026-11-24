@@ -37,6 +37,8 @@ pub struct AppState {
     pub ocr: std::sync::Arc<crate::ocr::Ocr>,
     pub updater: crate::update::Updater,
     pub secrets: crate::secrets::Secrets,
+    /// Set by "Stop" while the map is being built.
+    pub map_stop: std::sync::atomic::AtomicBool,
 }
 
 impl AppState {
@@ -94,6 +96,20 @@ impl AppState {
                     .api_key()
                     .ok_or_else(|| anyhow!("No Anthropic API key set. Add one in Settings, or switch the provider to Cursor."))?;
                 Ok(Llm::Claude(Claude::new(key, self.setting("model"))))
+            }
+            Provider::Cursor => Ok(Llm::Cursor(self.cursor()?)),
+        }
+    }
+
+    /// The model client for building the map: the map model on Anthropic, Cursor's own otherwise.
+    pub fn map_llm(&self) -> Result<Llm> {
+        match self.provider() {
+            Provider::Anthropic => {
+                let key = self
+                    .api_key()
+                    .ok_or_else(|| anyhow!("No Anthropic API key set. Add one in Settings, or switch the provider to Cursor."))?;
+                let model = self.setting("map_model").unwrap_or_else(|| crate::claude::DEFAULT_MAP_MODEL.into());
+                Ok(Llm::Claude(Claude::new(key, Some(model))))
             }
             Provider::Cursor => Ok(Llm::Cursor(self.cursor()?)),
         }

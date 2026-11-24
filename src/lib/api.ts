@@ -53,6 +53,7 @@ export interface Settings {
   mcp_error: string | null;
   llama_server_path: string;
   ocr_autoload: boolean;
+  map_model: string;
 }
 export interface SearchHit {
   page: number;
@@ -72,6 +73,43 @@ export interface OcrInfo {
   model: string;
   downloaded: boolean;
   status: OcrStatus;
+}
+export interface Usage {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+export interface MapOutcome {
+  stopped: boolean;
+  sections: number;
+  model: string | null;
+  usage: Usage | null;
+  cost: number | null;
+}
+export interface MapEstimate {
+  sections: number;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost: number | null;
+}
+export const MAP_MODELS: [string, string][] = [
+  ["claude-haiku-5-5", "Haiku 5.5"],
+  ["claude-sonnet-5-5", "Sonnet 5.5"],
+  ["claude-opus-5-5", "Opus 5.5"],
+];
+export function modelName(id: string | null | undefined) {
+  return MAP_MODELS.find(([m]) => m === id)?.[1] ?? id ?? "";
+}
+export function usageTotal(u: Usage) {
+  return u.input + u.output + u.cache_read + u.cache_write;
+}
+export function tokens(n: number) {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+export function dollars(n: number) {
+  return n < 0.01 ? "under $0.01" : n < 10 ? `$${n.toFixed(2)}` : `$${Math.round(n)}`;
 }
 export interface UpdateRelease {
   version: string;
@@ -116,7 +154,9 @@ export const api = {
   updateStatus: () => invoke<UpdateStatus>("update_status"),
   checkUpdate: () => invoke<UpdateCheck>("check_update"),
   startUpdate: () => invoke("start_update"),
-  buildMap: (docId: string, redo: boolean) => invoke("build_map", { docId, redo }),
+  buildMap: (docId: string, redo: boolean) => invoke<MapOutcome>("build_map", { docId, redo }),
+  mapEstimate: (docId: string, redo: boolean) => invoke<MapEstimate>("map_estimate", { docId, redo }),
+  stopMap: () => invoke("stop_map"),
   ask: (a: { docId: string; sectionId: number | null; page: number; messages: ChatMsg[]; onDelta: Channel<string> }) =>
     invoke<string>("ask", a),
   addNote: (docId: string, page: number | null, text: string, source: string) => invoke<number>("add_note", { docId, page, text, source }),
@@ -133,6 +173,7 @@ export const api = {
     cursorAgentPath?: string;
     llamaServerPath?: string;
     ocrAutoload?: boolean;
+    mapModel?: string;
   }) => invoke("save_settings", { update }),
 };
 

@@ -4,9 +4,10 @@ import { create } from "zustand";
 import { Channel } from "@tauri-apps/api/core";
 import { ask, message, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toastManager } from "@/components/ui/toast";
-import { api, providerProblem, type ChatMsg, type Doc, type Note, type OcrStatus, type Section, type Settings, type TextStatus, type UpdateCheck, type UpdateStatus } from "./api";
+import { api, providerProblem, type ChatMsg, type Doc, type Note, type OcrStatus, type Section, type Settings, type TextStatus, type UpdateCheck, type UpdateStatus, type Usage, dollars, modelName, tokens, usageTotal } from "./api";
 import { extractOutline, extractText, loadPdf, pageImage, pdfTitle, type PDFDocumentProxy } from "./pdf";
 import { load, save } from "./persist";
+import { perf } from "./perf";
 
 export type View = "map" | "search" | "notes" | "library";
 
@@ -43,7 +44,7 @@ interface State {
   chatError: string;
 
   task: Task | null;
-  mapRun: { done: number; total: number } | null;
+  mapRun: { done: number; total: number; tokens: number | null; cost: number | null; stopping: boolean } | null;
   ocrRun: { done: number; total: number; cancelled: boolean } | null;
   ocrServer: OcrStatus;
   /** `dismissed`: the version whose popup the reader closed this session. */
@@ -54,7 +55,8 @@ interface State {
 interface Actions {
   init(): Promise<void>;
   choosePdf(): Promise<void>;
-  openPath(path: string): Promise<void>;
+  /** `quiet`: reopening at launch, so a missing file just falls back to the welcome screen. */
+  openPath(path: string, quiet?: boolean): Promise<void>;
   refreshMap(): Promise<void>;
   refreshNotes(): Promise<void>;
   refreshTextStatus(): Promise<void>;
@@ -86,7 +88,8 @@ interface Actions {
   startUpdate(): Promise<void>;
   dismissUpdate(): void;
   setUpdateStatus(s: UpdateStatus): void;
-  setMapProgress(done: number, total: number, current: string): void;
+  setMapProgress(p: { done: number; total: number; current: string; usage: Usage | null; cost: number | null }): void;
+  stopMap(): void;
   flash(text: string): void;
 }
 
@@ -142,7 +145,11 @@ export const useApp = create<State & Actions>()((set, get) => ({
   expanded: new Set(),
 
   async init() {
+    perf.start();
     await Promise.all([get().loadSettings(), get().refreshRecent()]);
+    // Reopen what was open when the app last quit, at the page you were on.
+    const last = load<string | null>("lastPath", null);
+    if (last && !get().doc) await get().openPath(last, true);
   },
 
   async choosePdf() {
@@ -150,7 +157,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     if (typeof path === "string") await get().openPath(path);
   },
 
-  async openPath(path) {
+  async openPath(path, quiet = false) {
     const run = get().ocrRun;
     if (run) run.cancelled = true;
     try {
@@ -178,10 +185,16 @@ export const useApp = create<State & Actions>()((set, get) => ({
         currentPage: doc.last_page || 1,
       });
       get().goToPage(doc.last_page || 1, false);
+      save("lastPath", path);
       await Promise.all([get().refreshMap(), get().refreshNotes(), get().refreshTextStatus(), get().refreshRecent()]);
       set({ task: null });
     } catch (e) {
       set({ task: null });
+      if (quiet) {
+        // Reopening at launch: the file was moved or deleted. Start on the welcome screen.
+        save("lastPath", null);
+        return;
+      }
       await message(`Could not open the PDF.\n\n${e}`, { title: "Anagnost", kind: "error" });
     }
   },
@@ -215,6 +228,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   },
 
   goToPage(n, smooth = false) {
+    perf.mark(`go ${n}`);
     const pdf = get().pdf;
     if (!pdf) return;
     const page = Math.min(pdf.numPages, Math.max(1, Math.round(n)));
@@ -314,11 +328,30 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
     const mapped = sections.filter((s) => s.summary).length;
     const redo = mapped === sections.length && mapped > 0;
-    if (redo && !(await ask("Rebuild every section summary? This makes new Claude API calls.", { title: "Rebuild map", kind: "warning", okLabel: "Rebuild" }))) return;
-    set({ mapRun: { done: 0, total: 0 }, task: { text: "Building map…" } });
+    // Say what it will cost before spending anything.
+    let est;
     try {
-      await api.buildMap(doc.id, redo);
-      get().flash("Map built");
+      est = await api.mapEstimate(doc.id, redo);
+    } catch (e) {
+      await message(String(e), { title: "Build map", kind: "error" });
+      return;
+    }
+    const what = `${redo ? "Rebuild" : mapped ? "Finish" : "Build"} the map: ${est.sections} ${est.sections === 1 ? "section" : "sections"}.`;
+    const cost = est.model
+      ? `With ${modelName(est.model)}: about ${tokens(est.input_tokens)} input and ${tokens(est.output_tokens)} output tokens, roughly ${est.cost !== null ? dollars(est.cost) : "an unknown cost"} on your Anthropic account. You can change the model in Settings.`
+      : "It runs on your Cursor plan with Cursor's model. Cursor doesn't report token use.";
+    const go = await ask(`${what}\n\n${cost}\n\nYou can stop at any time; finished sections are kept.`, {
+      title: "Build map",
+      kind: "info",
+      okLabel: redo ? "Rebuild" : "Build",
+      cancelLabel: "Cancel",
+    });
+    if (!go) return;
+    set({ mapRun: { done: 0, total: est.sections + 1, tokens: null, cost: null, stopping: false }, task: { text: "Building map…" } });
+    try {
+      const out = await api.buildMap(doc.id, redo);
+      const spent = out.usage ? ` · ${tokens(usageTotal(out.usage))} tokens${out.cost !== null ? `, ${dollars(out.cost)}` : ""}` : "";
+      get().flash(out.stopped ? `Map stopped after ${out.sections} sections${spent}` : `Map built${spent}`);
     } catch (e) {
       set({ task: null });
       await message(String(e), { title: "Build map", kind: "error" });
@@ -327,9 +360,18 @@ export const useApp = create<State & Actions>()((set, get) => ({
       get().refreshMap();
     }
   },
-
-  setMapProgress(done, total, current) {
-    set({ mapRun: { done, total }, task: { text: `Mapping ${done}/${total} · ${current}` } });
+  setMapProgress({ done, total, current, usage, cost }) {
+    const run = get().mapRun;
+    set({
+      mapRun: { done, total, tokens: usage ? usageTotal(usage) : null, cost, stopping: run?.stopping ?? false },
+      task: { text: run?.stopping ? "Stopping the map…" : `Mapping ${done}/${total} · ${current}` },
+    });
+  },
+  stopMap() {
+    const run = get().mapRun;
+    if (!run || run.stopping) return;
+    set({ mapRun: { ...run, stopping: true }, task: { text: "Stopping the map…" } });
+    api.stopMap();
   },
 
   async recognize() {

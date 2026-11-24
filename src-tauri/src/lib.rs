@@ -157,6 +157,28 @@ async fn cursor_models(state: S<'_>) -> CmdResult<Vec<String>> {
     cursor.models().await.map_err(err)
 }
 
+/// Appends the frontend's performance events to perf.log in the data folder, kept under 512 KB.
+#[tauri::command]
+fn perf_log(app: tauri::AppHandle, lines: Vec<String>) -> CmdResult<()> {
+    use std::io::Write;
+    let path = app.path().app_data_dir().map_err(err)?.join("perf.log");
+    if std::fs::metadata(&path).map(|m| m.len() > 512 * 1024).unwrap_or(false) {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut half = text.len() / 2;
+        while !text.is_char_boundary(half) {
+            half += 1;
+        }
+        let keep = &text[half..];
+        let keep = keep.find('\n').map_or(keep, |i| &keep[i + 1..]);
+        std::fs::write(&path, keep).map_err(err)?;
+    }
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(err)?;
+    for l in lines.iter().take(1000) {
+        writeln!(f, "{}", l.replace('\n', " ")).map_err(err)?;
+    }
+    Ok(())
+}
+
 // ---------- updates ----------
 
 #[tauri::command]
@@ -190,8 +212,20 @@ async fn ocr_stop(state: S<'_>) -> CmdResult<()> {
 // ---------- Claude ----------
 
 #[tauri::command]
-async fn build_map(state: S<'_>, doc_id: String, redo: bool) -> CmdResult<()> {
-    mapping::build_map(state.inner().clone(), doc_id, redo).await.map_err(err)
+async fn build_map(state: S<'_>, doc_id: String, redo: bool) -> CmdResult<mapping::Outcome> {
+    mapping::build_map(state.inner().clone(), doc_id, redo).await.map_err(|e| format!("{e:#}"))
+}
+
+/// Sections, tokens and estimated cost of building the map, shown before starting.
+#[tauri::command]
+fn map_estimate(state: S, doc_id: String, redo: bool) -> CmdResult<mapping::Estimate> {
+    mapping::estimate(&state, &doc_id, redo).map_err(err)
+}
+
+/// Stop building the map; sections finished so far are kept.
+#[tauri::command]
+fn stop_map(state: S) {
+    state.map_stop.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[derive(Deserialize)]
@@ -292,6 +326,8 @@ struct Settings {
     llama_server_path: String,
     /// Load the OCR model when the app opens and keep it loaded.
     ocr_autoload: bool,
+    /// Claude model for building the map.
+    map_model: String,
 }
 
 #[tauri::command]
@@ -310,6 +346,7 @@ fn get_settings(state: S) -> CmdResult<Settings> {
         mcp_error: state.mcp_error.lock().unwrap().clone(),
         llama_server_path: llama_server_path(&state).unwrap_or_default(),
         ocr_autoload: ocr_autoload(&state),
+        map_model: state.setting("map_model").unwrap_or_else(|| claude::DEFAULT_MAP_MODEL.into()),
     })
 }
 
@@ -325,6 +362,7 @@ struct SettingsUpdate {
     cursor_agent_path: Option<String>,
     llama_server_path: Option<String>,
     ocr_autoload: Option<bool>,
+    map_model: Option<String>,
 }
 
 #[tauri::command]
@@ -354,6 +392,7 @@ fn save_settings(state: S, update: SettingsUpdate) -> CmdResult<()> {
         ("cursor_agent_path", update.cursor_agent_path),
         ("llama_server_path", update.llama_server_path),
         ("ocr_autoload", ocr_autoload),
+        ("map_model", update.map_model),
     ];
     state
         .with_db(|c| {
@@ -399,6 +438,7 @@ pub fn run() {
                 ocr: ocr::Ocr::new(app.handle().clone(), dir.clone()),
                 updater: update::Updater::new(app.handle().clone(), &dir),
                 secrets: secrets::Secrets::open(&dir)?,
+                map_stop: std::sync::atomic::AtomicBool::new(false),
             });
             app.manage(state.clone());
             update::adopt_new_bundle_name();
@@ -432,6 +472,8 @@ pub fn run() {
             set_studied,
             set_view,
             build_map,
+            map_estimate,
+            stop_map,
             ask,
             add_note,
             list_notes,
@@ -443,6 +485,7 @@ pub fn run() {
             ocr_finish,
             ocr_setup,
             cursor_models,
+            perf_log,
             update_status,
             check_update,
             start_update,

@@ -14,7 +14,7 @@ import { StatusBar } from "@/components/workbench/StatusBar";
 import { TitleBar } from "@/components/workbench/TitleBar";
 import { UpdatePopup } from "@/components/workbench/UpdatePopup";
 import { Tutor } from "@/components/workbench/Tutor";
-import { api, type OcrStatus, type UpdateStatus } from "@/lib/api";
+import { api, type OcrStatus, type UpdateStatus, type Usage } from "@/lib/api";
 import { useApp } from "@/lib/store";
 import { useZoom } from "@/lib/zoom";
 
@@ -22,8 +22,8 @@ function useBackendEvents() {
   useEffect(() => {
     const app = useApp.getState();
     const subs = [
-      listen<{ doc_id: string; done: number; total: number; current: string }>("map-progress", (e) => {
-        if (e.payload.doc_id === useApp.getState().doc?.id) app.setMapProgress(e.payload.done, e.payload.total, e.payload.current);
+      listen<{ doc_id: string; done: number; total: number; current: string; usage: Usage | null; cost: number | null }>("map-progress", (e) => {
+        if (e.payload.doc_id === useApp.getState().doc?.id) app.setMapProgress(e.payload);
       }),
       listen<string>("doc-changed", (e) => {
         if (e.payload === useApp.getState().doc?.id) {
