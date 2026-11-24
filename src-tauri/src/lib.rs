@@ -114,6 +114,11 @@ fn search(state: S, doc_id: String, query: String) -> CmdResult<Vec<db::SearchHi
 
 // ---------- OCR ----------
 
+/// On unless turned off in Settings.
+fn ocr_autoload(state: &AppState) -> bool {
+    state.setting("ocr_autoload").as_deref() != Some("0")
+}
+
 fn llama_server_path(state: &AppState) -> Option<String> {
     state.with_db(|c| db::get_setting(c, "llama_server_path")).ok().flatten()
 }
@@ -145,12 +150,14 @@ fn ocr_finish(state: S, doc_id: String) -> CmdResult<bool> {
     Ok(rechunked)
 }
 
-// ---------- updates ----------
-
+/// Models the saved Cursor key can use, for the Model suggestions in Settings.
 #[tauri::command]
-fn update_info(state: S) -> update::Info {
-    state.updater.info()
+async fn cursor_models(state: S<'_>) -> CmdResult<Vec<String>> {
+    let cursor = state.cursor().map_err(err)?;
+    cursor.models().await.map_err(err)
 }
+
+// ---------- updates ----------
 
 #[tauri::command]
 fn update_status(state: S) -> update::Status {
@@ -283,6 +290,8 @@ struct Settings {
     mcp_token: String,
     mcp_error: Option<String>,
     llama_server_path: String,
+    /// Load the OCR model when the app opens and keep it loaded.
+    ocr_autoload: bool,
 }
 
 #[tauri::command]
@@ -300,6 +309,7 @@ fn get_settings(state: S) -> CmdResult<Settings> {
         mcp_token: state.mcp_token.clone(),
         mcp_error: state.mcp_error.lock().unwrap().clone(),
         llama_server_path: llama_server_path(&state).unwrap_or_default(),
+        ocr_autoload: ocr_autoload(&state),
     })
 }
 
@@ -314,6 +324,7 @@ struct SettingsUpdate {
     cursor_model: Option<String>,
     cursor_agent_path: Option<String>,
     llama_server_path: Option<String>,
+    ocr_autoload: Option<bool>,
 }
 
 #[tauri::command]
@@ -324,6 +335,17 @@ fn save_settings(state: S, update: SettingsUpdate) -> CmdResult<()> {
     if let Some(k) = update.cursor_api_key {
         state.set_cursor_key(k.trim()).map_err(err)?;
     }
+    if let Some(on) = update.ocr_autoload {
+        state.ocr.set_keep_loaded(on);
+        if on {
+            let st = state.inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let path = llama_server_path(&st);
+                st.ocr.autoload(path.as_deref()).await;
+            });
+        }
+    }
+    let ocr_autoload = update.ocr_autoload.map(|on| if on { "1" } else { "0" }.to_string());
     let provider = update.provider.map(|p| if p == state::Provider::Cursor { "cursor" } else { "anthropic" }.to_string());
     let fields = [
         ("provider", provider),
@@ -331,6 +353,7 @@ fn save_settings(state: S, update: SettingsUpdate) -> CmdResult<()> {
         ("cursor_model", update.cursor_model),
         ("cursor_agent_path", update.cursor_agent_path),
         ("llama_server_path", update.llama_server_path),
+        ("ocr_autoload", ocr_autoload),
     ];
     state
         .with_db(|c| {
@@ -379,6 +402,17 @@ pub fn run() {
             });
             app.manage(state.clone());
 
+            if ocr_autoload(&state) {
+                state.ocr.set_keep_loaded(true);
+                let st = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Let the window come up first; loading reads ~5 GB from disk.
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let path = llama_server_path(&st);
+                    st.ocr.autoload(path.as_deref()).await;
+                });
+            }
+
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = mcp::serve(state.clone()).await {
                     eprintln!("MCP server stopped: {e}");
@@ -407,7 +441,7 @@ pub fn run() {
             ocr_page,
             ocr_finish,
             ocr_setup,
-            update_info,
+            cursor_models,
             update_status,
             check_update,
             start_update,

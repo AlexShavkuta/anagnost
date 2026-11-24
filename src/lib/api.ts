@@ -52,6 +52,7 @@ export interface Settings {
   mcp_token: string;
   mcp_error: string | null;
   llama_server_path: string;
+  ocr_autoload: boolean;
 }
 export interface SearchHit {
   page: number;
@@ -72,17 +73,23 @@ export interface OcrInfo {
   downloaded: boolean;
   status: OcrStatus;
 }
-export interface UpdateInfo {
-  commit: string;
-  commit_date: string;
-  source: string;
-  unavailable: string | null;
+export interface UpdateRelease {
+  version: string;
+  notes: string[];
+  url: string;
+  downloadable: boolean;
 }
 export interface UpdateCheck {
-  behind: number;
-  commits: { sha: string; message: string }[];
+  current: string;
+  latest: UpdateRelease | null;
+  newer: boolean;
+  /** Why the app can't install it itself, if it can't. */
+  unavailable: string | null;
 }
-export type UpdateStatus = { state: "idle" } | { state: "running"; step: string } | { state: "error"; message: string };
+export type UpdateStatus =
+  | { state: "idle" }
+  | { state: "running"; step: string; progress: number | null }
+  | { state: "error"; message: string };
 export interface ChatMsg {
   role: "user" | "assistant";
   content: string;
@@ -105,7 +112,7 @@ export const api = {
   ocrFinish: (docId: string) => invoke<boolean>("ocr_finish", { docId }),
   ocrStop: () => invoke("ocr_stop"),
   ocrSetup: () => invoke("ocr_setup"),
-  updateInfo: () => invoke<UpdateInfo>("update_info"),
+  cursorModels: () => invoke<string[]>("cursor_models"),
   updateStatus: () => invoke<UpdateStatus>("update_status"),
   checkUpdate: () => invoke<UpdateCheck>("check_update"),
   startUpdate: () => invoke("start_update"),
@@ -125,6 +132,7 @@ export const api = {
     cursorModel?: string;
     cursorAgentPath?: string;
     llamaServerPath?: string;
+    ocrAutoload?: boolean;
   }) => invoke("save_settings", { update }),
 };
 

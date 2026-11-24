@@ -27,11 +27,7 @@ DEST="/Applications"
 [[ -w "$DEST" ]] || DEST="$HOME/Applications"
 mkdir -p "$DEST"
 
-if [[ -n "${PDF_TUTOR_PID:-}" ]]; then
-  # Started by the app's Update button: the app quits itself when it sees this line.
-  echo "::step Installing"
-  for _ in $(seq 1 40); do kill -0 "$PDF_TUTOR_PID" 2>/dev/null || break; sleep 0.5; done
-elif pgrep -f "$DEST/$APP_NAME.app/Contents/MacOS/" >/dev/null; then
+if pgrep -f "$DEST/$APP_NAME.app/Contents/MacOS/" >/dev/null; then
   say "Quitting the running copy"
   osascript -e "quit app \"$APP_NAME\"" || true
   sleep 2

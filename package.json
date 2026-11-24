@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "install-app": "bash scripts/install-macos.sh"
+    "install-app": "bash scripts/install-macos.sh",
+    "release": "bash scripts/release.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

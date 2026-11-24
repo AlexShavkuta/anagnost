@@ -12,8 +12,9 @@ import { SettingsDialog } from "@/components/workbench/SettingsDialog";
 import { SideBar } from "@/components/workbench/SideBar";
 import { StatusBar } from "@/components/workbench/StatusBar";
 import { TitleBar } from "@/components/workbench/TitleBar";
+import { UpdatePopup } from "@/components/workbench/UpdatePopup";
 import { Tutor } from "@/components/workbench/Tutor";
-import type { OcrStatus, UpdateStatus } from "@/lib/api";
+import { api, type OcrStatus, type UpdateStatus } from "@/lib/api";
 import { useApp } from "@/lib/store";
 import { useZoom } from "@/lib/zoom";
 
@@ -34,10 +35,14 @@ function useBackendEvents() {
       listen<OcrStatus>("ocr-status", (e) => app.setOcrServer(e.payload)),
       listen<UpdateStatus>("update-status", (e) => app.setUpdateStatus(e.payload)),
     ];
-    // One quiet check per launch; the status bar offers the update if there is one.
+    // The backend may have started loading the OCR model before these listeners existed.
+    api.ocrInfo().then((i) => app.setOcrServer(i.status)).catch(() => {});
+    // Check GitHub Releases at launch and every 6 hours; a newer version shows the update popup.
     const t = setTimeout(() => app.checkForUpdates(true), 4000);
+    const every = setInterval(() => app.checkForUpdates(true), 6 * 60 * 60 * 1000);
     return () => {
       clearTimeout(t);
+      clearInterval(every);
       subs.forEach((p) => p.then((un) => un()));
     };
   }, []);
@@ -174,6 +179,7 @@ export default function App() {
         <StatusBar />
       </div>
       <SettingsDialog />
+      <UpdatePopup />
       <CommandPalette />
       </ToastProvider>
     </TooltipProvider>

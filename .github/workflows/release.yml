@@ -1,0 +1,68 @@
+# Builds PDF Tutor for macOS (universal: Apple silicon + Intel) when a version tag is pushed,
+# and publishes a GitHub release with the zipped app and its SHA-256. The app's updater reads
+# the latest release, so publishing one is what offers the update to users.
+#
+# Release with: npm run release -- 0.3.0   (bumps the version, commits, tags v0.3.0, pushes)
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the app version
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the app version $version (src-tauri/tauri.conf.json)"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build the app
+        run: npx tauri build --target universal-apple-darwin --bundles app
+
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="PDF-Tutor-$version-macos-universal.zip"
+          ditto -c -k --keepParent "src-tauri/target/universal-apple-darwin/release/bundle/macos/PDF Tutor.app" "$RUNNER_TEMP/$name"
+          cd "$RUNNER_TEMP" && shasum -a 256 "$name" > "$name.sha256" && cat "$name.sha256"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/PDF-Tutor-* \
+            --title "PDF Tutor ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            --verify-tag

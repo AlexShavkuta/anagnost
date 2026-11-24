@@ -31,7 +31,17 @@ The app is built on your Mac and signed for it alone, so macOS opens it without 
 
 ### Updating
 
-Settings → Updates (or the status bar's **Update available**) pulls the new commits into the clone the app was built from, rebuilds it, and restarts the app. From a terminal, the same thing is `git pull && npm run install-app` in that folder.
+When a new version is released, PDF Tutor shows a popup in the bottom-right corner. **Update and restart** downloads it from GitHub Releases, checks its SHA-256, replaces the app and reopens it. The app checks at launch and every 6 hours; Settings → Updates checks on demand.
+
+You can also download the zip from the [Releases page](https://github.com/AlexShavkuta/pdf-tutor/releases). The app isn't notarized, so the first time macOS blocks a downloaded copy: right-click it → Open, or run `xattr -dr com.apple.quarantine "/Applications/PDF Tutor.app"`. Updates installed from inside the app don't need this.
+
+### Releasing (maintainers)
+
+```bash
+npm run release -- 0.3.0
+```
+
+This bumps the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, commits, tags `v0.3.0` and pushes. The tag starts `.github/workflows/release.yml`, which tests, builds a universal (Apple silicon + Intel) app, and publishes the release with the zip and its SHA-256. Release notes are generated from the merged pull requests.
 
 ## Develop
 
@@ -47,7 +57,7 @@ In **Settings → Tutor and map**, choose which account answers:
 - **Anthropic API key**: calls the Claude API directly. The default model is `claude-opus-5-5`.
 - **Cursor API key**: runs your Cursor plan through Cursor's CLI, `cursor-agent`. Create a key in the Cursor dashboard under Integrations. Leave the model empty for Cursor's default, or name one your plan offers. Install the CLI with `curl https://cursor.com/install -fsS | bash` if you don't have it.
 
-Keys are kept in `keys.json` in the app's data folder (`~/Library/Application Support/com.alex.pdftutor/`), readable only by your user (mode 600). They used to be in the Keychain; because the app is built locally and only ad-hoc signed, every rebuild made the Keychain ask for your password again. Keys saved there by older versions are moved over once. `ANTHROPIC_API_KEY` and `CURSOR_API_KEY` in the environment work as fallbacks.
+Keys are kept in `keys.json` in the app's data folder (`~/Library/Application Support/com.alex.pdftutor/`), readable only by your user (mode 600). The app never touches the Keychain: it's built locally and only ad-hoc signed, so the Keychain would ask for your password after every rebuild. `ANTHROPIC_API_KEY` and `CURSOR_API_KEY` in the environment work as fallbacks.
 
 `cursor-agent` is a coding agent, so PDF Tutor keeps it read-only. It runs in ask mode, in an empty temporary folder that's deleted afterwards, with a workspace config that denies shell commands and file writes, and never with `--force`. The key is passed in the environment, so it doesn't appear in the process list.
 
@@ -57,6 +67,7 @@ Map building makes one model call per section, plus one per parent section and o
 
 When a PDF has pages with no text layer, the Map view offers to recognize them. PDF Tutor renders each page and sends it to [Qianfan-OCR](https://huggingface.co/baidu/Qianfan-OCR) (a 4B document model from Baidu), running locally in llama.cpp's `llama-server`. Nothing leaves your Mac.
 
+- The model loads when PDF Tutor opens and stays loaded while it's open (about 5 GB of memory); turn this off in Settings to load it on first use and unload it after 5 idle minutes. It never starts a download on its own.
 - Needs llama.cpp. **Settings → Text recognition → Install and load** downloads the official macOS build (about 17 MB, from ggml-org/llama.cpp releases) into the app's data folder, then downloads and loads the model. A Homebrew copy (`brew install llama.cpp`), one on your `PATH`, or a path set in Settings works too.
 - The first run downloads the model, about 4.8 GB (`ggml-org/Qianfan-OCR-GGUF`, Q8_0), into the Hugging Face cache (`~/.cache/huggingface/hub`).
 - The app starts the server when it's needed and stops it after 5 idle minutes, or when you click *OCR model loaded* in the status bar.
@@ -105,7 +116,7 @@ src-tauri/src/
   ocr.rs              runs Qianfan-OCR in llama-server, on demand
   state.rs            shared state
   secrets.rs          API keys (private file)
-  update.rs           Update button: git pull + rebuild
+  update.rs           updates from GitHub Releases
 ```
 
 ## Limits
