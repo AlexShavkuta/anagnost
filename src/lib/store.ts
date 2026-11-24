@@ -182,7 +182,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       set({ task: null });
     } catch (e) {
       set({ task: null });
-      await message(`Could not open the PDF.\n\n${e}`, { title: "PDF Tutor", kind: "error" });
+      await message(`Could not open the PDF.\n\n${e}`, { title: "Anagnost", kind: "error" });
     }
   },
 

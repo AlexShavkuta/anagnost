@@ -401,6 +401,7 @@ pub fn run() {
                 secrets: secrets::Secrets::open(&dir)?,
             });
             app.manage(state.clone());
+            update::adopt_new_bundle_name();
 
             if ocr_autoload(&state) {
                 state.ocr.set_keep_loaded(true);

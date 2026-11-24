@@ -151,12 +151,12 @@ export function providerProblem(s: Settings | null): { title: string; text: stri
   return null;
 }
 
-/** "Add to Cursor" deeplink that installs PDF Tutor's MCP server in Cursor. */
+/** "Add to Cursor" deeplink that installs Anagnost's MCP server in Cursor. */
 export function cursorInstallLink(s: Settings): string {
   const config = { url: s.mcp_url, headers: { Authorization: `Bearer ${s.mcp_token}` } };
-  return `cursor://anysphere.cursor-deeplink/mcp/install?name=pdf-tutor&config=${encodeURIComponent(btoa(JSON.stringify(config)))}`;
+  return `cursor://anysphere.cursor-deeplink/mcp/install?name=anagnost&config=${encodeURIComponent(btoa(JSON.stringify(config)))}`;
 }
 
 export function cursorMcpJson(s: Settings): string {
-  return JSON.stringify({ mcpServers: { "pdf-tutor": { url: s.mcp_url, headers: { Authorization: `Bearer ${s.mcp_token}` } } } }, null, 2);
+  return JSON.stringify({ mcpServers: { "anagnost": { url: s.mcp_url, headers: { Authorization: `Bearer ${s.mcp_token}` } } } }, null, 2);
 }

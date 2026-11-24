@@ -536,7 +536,7 @@ mod tests {
     use super::*;
 
     fn mem() -> Connection {
-        let dir = std::env::temp_dir().join(format!("pdf-tutor-test-{}.db", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("anagnost-test-{}.db", uuid::Uuid::new_v4()));
         open(&dir).unwrap()
     }
 

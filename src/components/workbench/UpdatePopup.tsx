@@ -31,7 +31,7 @@ export function UpdatePopup() {
       <div className="flex items-start gap-2.5">
         <ArrowUpCircle className="mt-0.5 size-4 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <h2 className="text-[13px] font-semibold">PDF Tutor {latest.version} is available</h2>
+          <h2 className="text-[13px] font-semibold">Anagnost {latest.version} is available</h2>
           <p className="text-xs text-muted-foreground">You have {check.current}.</p>
         </div>
         {!running && (
@@ -54,7 +54,7 @@ export function UpdatePopup() {
           <Progress value={status.progress !== null ? status.progress * 100 : null} aria-label={status.step}>
             <ProgressTrack className="h-1"><ProgressIndicator /></ProgressTrack>
           </Progress>
-          <p className="mt-1.5 text-xs text-muted-foreground">PDF Tutor restarts by itself when it's done.</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">Anagnost restarts by itself when it's done.</p>
         </div>
       ) : (
         <>

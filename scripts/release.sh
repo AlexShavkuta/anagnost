@@ -23,10 +23,10 @@ node -e '
   fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");
 ' "$version"
 perl -pi -e 'if (!$done && s/^version = "[^"]*"/version = "'"$version"'"/) { $done = 1 }' src-tauri/Cargo.toml
-cargo update -q --manifest-path src-tauri/Cargo.toml -p pdf-tutor
+cargo update -q --manifest-path src-tauri/Cargo.toml -p anagnost
 
 git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 git commit -qm "Release v$version"
-git tag -a "v$version" -m "PDF Tutor $version"
+git tag -a "v$version" -m "Anagnost $version"
 git push -q origin main "v$version"
 echo "Pushed v$version. GitHub Actions is building it: https://github.com/$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')/actions"

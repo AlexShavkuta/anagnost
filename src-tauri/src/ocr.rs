@@ -60,7 +60,7 @@ pub struct Ocr {
     server: tokio::sync::Mutex<Option<Server>>,
     status: Mutex<Status>,
     last_used: Mutex<Instant>,
-    /// Settings' "Load when PDF Tutor opens": then the model also stays loaded instead of
+    /// Settings' "Load when Anagnost opens": then the model also stays loaded instead of
     /// unloading after a few idle minutes.
     keep_loaded: std::sync::atomic::AtomicBool,
     log: Arc<Mutex<VecDeque<String>>>,
@@ -373,7 +373,7 @@ async fn download_llama(
     let suffix = format!("-bin-macos-{arch}.tar.gz");
     let releases: Value = http
         .get("https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10")
-        .header("User-Agent", "pdf-tutor")
+        .header("User-Agent", "anagnost")
         .header("Accept", "application/vnd.github+json")
         .timeout(Duration::from_secs(30))
         .send()
@@ -409,7 +409,7 @@ async fn download_llama(
 
     let mut resp = http
         .get(&url)
-        .header("User-Agent", "pdf-tutor")
+        .header("User-Agent", "anagnost")
         .timeout(Duration::from_secs(600))
         .send()
         .await?
@@ -541,7 +541,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn installs_llama() {
-        let dir = std::env::temp_dir().join(format!("pdf-tutor-llama-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("anagnost-llama-{}", std::process::id()));
         let target = dir.join("llama.cpp");
         let mut last = 0.0;
         download_llama(&reqwest::Client::new(), &target, |p| last = p)

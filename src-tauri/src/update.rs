@@ -18,14 +18,15 @@ const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const BUNDLE_ID: &str = "com.alex.pdftutor";
 
 const SWAP_SCRIPT: &str = r#"#!/bin/bash
-# Written by PDF Tutor's updater. $1: new app, $2: app to replace, $3: pid to wait for.
+# Written by Anagnost's updater. $1: new app, $2: app to replace, $3: pid to wait for,
+# $4: where the new app goes (differs from $2 when the app's name changed).
 set -u
 for _ in $(seq 1 60); do kill -0 "$3" 2>/dev/null || break; sleep 0.5; done
-rm -rf "$2.updating"
-ditto "$1" "$2.updating" || exit 1
-rm -rf "$2" && mv "$2.updating" "$2"
-xattr -dr com.apple.quarantine "$2" 2>/dev/null
-open "$2"
+rm -rf "$4.updating"
+ditto "$1" "$4.updating" || exit 1
+rm -rf "$2" "$4" && mv "$4.updating" "$4"
+xattr -dr com.apple.quarantine "$4" 2>/dev/null
+open "$4"
 "#;
 
 #[derive(Serialize, Clone)]
@@ -90,7 +91,7 @@ impl Updater {
         let resp = self
             .http
             .get(format!("https://api.github.com/repos/{repo}/releases/latest"))
-            .header("User-Agent", "pdf-tutor")
+            .header("User-Agent", "anagnost")
             .header("Accept", "application/vnd.github+json")
             .timeout(Duration::from_secs(20))
             .send()
@@ -135,12 +136,12 @@ impl Updater {
     }
 
     async fn install(&self, zip_url: &str, sha_url: Option<&str>) -> Result<()> {
-        let bundle = bundle_path().ok_or_else(|| anyhow!("PDF Tutor isn't running from an installed app."))?;
+        let bundle = bundle_path().ok_or_else(|| anyhow!("Anagnost isn't running from an installed app."))?;
         let _ = std::fs::remove_dir_all(&self.dir);
         std::fs::create_dir_all(&self.dir)?;
-        let zip = self.dir.join("PDF Tutor.zip");
+        let zip = self.dir.join("Anagnost.zip");
 
-        let mut resp = self.http.get(zip_url).header("User-Agent", "pdf-tutor").timeout(Duration::from_secs(900)).send().await?.error_for_status()?;
+        let mut resp = self.http.get(zip_url).header("User-Agent", "anagnost").timeout(Duration::from_secs(900)).send().await?.error_for_status()?;
         let total = resp.content_length().unwrap_or(0);
         let mut file = tokio::fs::File::create(&zip).await?;
         let mut hash = Sha256::new();
@@ -158,7 +159,7 @@ impl Updater {
 
         self.set_status(Status::Running { step: "Installing".into(), progress: None });
         if let Some(sha_url) = sha_url {
-            let expected = self.http.get(sha_url).header("User-Agent", "pdf-tutor").send().await?.error_for_status()?.text().await?;
+            let expected = self.http.get(sha_url).header("User-Agent", "anagnost").send().await?.error_for_status()?.text().await?;
             let expected = expected.split_whitespace().next().unwrap_or_default().to_lowercase();
             if hex::encode(hash.finalize()) != expected {
                 bail!("The download is damaged (checksum mismatch). Try again.");
@@ -173,7 +174,7 @@ impl Updater {
             .ok_or_else(|| anyhow!("the download has no app in it"))?;
         let plist = std::fs::read_to_string(new_app.join("Contents/Info.plist")).unwrap_or_default();
         if !plist.contains(&format!("<string>{BUNDLE_ID}</string>")) {
-            bail!("the download isn't PDF Tutor");
+            bail!("the download isn't Anagnost");
         }
         run("/usr/bin/codesign", &["--verify", "--deep", path(&new_app)]).await.context("the downloaded app's signature is invalid")?;
 
@@ -181,10 +182,12 @@ impl Updater {
         std::fs::write(&script, SWAP_SCRIPT)?;
         let log = std::fs::File::create(self.dir.join("swap.log"))?;
         let mut cmd = std::process::Command::new("/bin/bash");
+        let dest = bundle.parent().context("bad app location")?.join(new_app.file_name().context("bad app name")?);
         cmd.arg(&script)
             .arg(&new_app)
             .arg(&bundle)
             .arg(std::process::id().to_string())
+            .arg(&dest)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log);
@@ -192,6 +195,17 @@ impl Updater {
         std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
         cmd.spawn().context("could not start the installer")?;
         Ok(())
+    }
+}
+
+/// PDF Tutor was renamed Anagnost. Updates from 0.2.0 replace the app in place, so the bundle
+/// keeps its old folder name; rename it once so Finder, Launchpad and Spotlight show the new one.
+pub fn adopt_new_bundle_name() {
+    let Some(bundle) = bundle_path() else { return };
+    let Some(parent) = bundle.parent() else { return };
+    let wanted = parent.join("Anagnost.app");
+    if bundle.file_name().is_some_and(|n| n == "PDF Tutor.app") && !wanted.exists() {
+        let _ = std::fs::rename(&bundle, &wanted);
     }
 }
 
@@ -247,17 +261,17 @@ fn unavailable() -> Option<String> {
         return Some("Updating works in the installed app, not in development builds.".into());
     };
     let parent = bundle.parent()?;
-    let probe = parent.join(".pdf-tutor-write-test");
+    let probe = parent.join(".anagnost-write-test");
     match std::fs::write(&probe, b"") {
         Ok(()) => {
             let _ = std::fs::remove_file(probe);
             None
         }
-        Err(_) => Some(format!("PDF Tutor can't replace itself in {} (no write access). Download the new version from GitHub instead.", parent.display())),
+        Err(_) => Some(format!("Anagnost can't replace itself in {} (no write access). Download the new version from GitHub instead.", parent.display())),
     }
 }
 
-/// …/PDF Tutor.app for the running executable, if it is inside an app bundle.
+/// …/Anagnost.app for the running executable, if it is inside an app bundle.
 fn bundle_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let bundle = exe.parent()?.parent()?.parent()?;
@@ -283,8 +297,8 @@ mod tests {
             "html_url": "https://github.com/o/r/releases/tag/v0.3.0",
             "body": "## What's Changed\n* Faster page jumps by @someone in https://github.com/o/r/pull/3\n* Update popup by @someone in https://github.com/o/r/pull/4\n\n**Full Changelog**: https://github.com/o/r/compare/v0.2.0...v0.3.0",
             "assets": [
-                {"name": "PDF-Tutor-0.3.0-macos-universal.zip", "browser_download_url": "https://x/a.zip"},
-                {"name": "PDF-Tutor-0.3.0-macos-universal.zip.sha256", "browser_download_url": "https://x/a.zip.sha256"}
+                {"name": "Anagnost-0.3.0-macos-universal.zip", "browser_download_url": "https://x/a.zip"},
+                {"name": "Anagnost-0.3.0-macos-universal.zip.sha256", "browser_download_url": "https://x/a.zip.sha256"}
             ]
         });
         let r = parse_release(&v);
