@@ -1,6 +1,6 @@
 [package]
 name = "pdf-tutor"
-version = "0.1.0"
+version = "0.2.0"
 repository = "https://github.com/AlexShavkuta/pdf-tutor"
 description = "A Tauri App"
 authors = ["you"]
