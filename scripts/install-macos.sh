@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build PDF Tutor from source and install it into /Applications.
+# Build Anagnost from source and install it into /Applications.
 # Usage: ./scripts/install-macos.sh   (or: npm run install-app)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-APP_NAME="PDF Tutor"
+APP_NAME="Anagnost"
 BUNDLE="src-tauri/target/release/bundle/macos/$APP_NAME.app"
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }

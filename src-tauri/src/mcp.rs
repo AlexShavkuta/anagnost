@@ -1,6 +1,6 @@
 //! MCP server (Streamable HTTP transport, JSON responses) on 127.0.0.1.
 //! Claude Code connects with:
-//!   claude mcp add --transport http pdf-tutor http://127.0.0.1:<port>/mcp \
+//!   claude mcp add --transport http anagnost http://127.0.0.1:<port>/mcp \
 //!     --header "Authorization: Bearer <token>"
 
 use crate::db::{self, Concept};
@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use tauri::Emitter;
 
-const SERVER_NAME: &str = "pdf-tutor";
+const SERVER_NAME: &str = "anagnost";
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
 const MAX_PAGES_PER_READ: i64 = 30;
 
@@ -70,7 +70,7 @@ fn dispatch(state: &AppState, msg: Value) -> Option<Value> {
             "protocolVersion": params["protocolVersion"].as_str().unwrap_or(DEFAULT_PROTOCOL),
             "capabilities": {"tools": {}},
             "serverInfo": {"name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION")},
-            "instructions": "Tools for the PDF the user has open in PDF Tutor. Start with get_status, \
+            "instructions": "Tools for the PDF the user has open in Anagnost. Start with get_status, \
                 then get_map to see the section tree. Use read_section to read text, go_to_page to \
                 show the user a page, and save_section_analysis / add_note to record what you teach \
                 so it appears in the app's map and notes.",

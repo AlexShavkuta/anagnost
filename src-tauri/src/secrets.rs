@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn saves_privately_and_reloads() {
-        let dir = std::env::temp_dir().join(format!("pdf-tutor-secrets-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("anagnost-secrets-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let s = Secrets::open(&dir).unwrap();
         assert_eq!(s.get(ANTHROPIC), None);

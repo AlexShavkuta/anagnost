@@ -18,7 +18,7 @@ export function TitleBar() {
         className="relative flex h-[22px] items-center justify-center gap-1.5 overflow-hidden rounded-md border border-input bg-background px-2 text-xs whitespace-nowrap text-muted-foreground shadow-xs/5 transition-colors hover:text-foreground dark:bg-input/32"
       >
         <Search className="size-3.5 shrink-0 opacity-80" />
-        <span className="truncate">{doc?.title ?? "PDF Tutor"}</span>
+        <span className="truncate">{doc?.title ?? "Anagnost"}</span>
         <Kbd className="absolute right-1 h-4 text-[10px]">⌘K</Kbd>
       </button>
       <div data-tauri-drag-region className="flex h-full items-center justify-end gap-0.5 pr-2">

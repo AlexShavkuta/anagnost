@@ -255,7 +255,7 @@ function Welcome() {
   return (
     <div className="absolute inset-0 flex justify-center overflow-auto bg-background">
       <div className="w-[min(460px,100%-48px)] pt-[14vh] pb-12">
-        <h1 className="text-[26px] font-semibold tracking-tight">PDF Tutor</h1>
+        <h1 className="text-[26px] font-semibold tracking-tight">Anagnost</h1>
         <p className="mt-1 mb-7 text-sm text-muted-foreground">Read a PDF with a tutor that knows what's on the page.</p>
         <h3 className="mt-6 mb-1.5 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">Start</h3>
         <div className={row}>

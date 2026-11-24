@@ -51,7 +51,7 @@ impl AppState {
             .unwrap()
             .doc_id
             .clone()
-            .ok_or_else(|| anyhow!("No document is open in PDF Tutor. Ask the user to open one."))
+            .ok_or_else(|| anyhow!("No document is open in Anagnost. Ask the user to open one."))
     }
 
     /// Tell the frontend that stored data for a document changed (map, notes, overview).

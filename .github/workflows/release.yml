@@ -1,4 +1,4 @@
-# Builds PDF Tutor for macOS (universal: Apple silicon + Intel) when a version tag is pushed,
+# Builds Anagnost for macOS (universal: Apple silicon + Intel) when a version tag is pushed,
 # and publishes a GitHub release with the zipped app and its SHA-256. The app's updater reads
 # the latest release, so publishing one is what offers the update to users.
 #
@@ -54,15 +54,15 @@ jobs:
       - name: Package
         run: |
           version="${GITHUB_REF_NAME#v}"
-          name="PDF-Tutor-$version-macos-universal.zip"
-          ditto -c -k --keepParent "src-tauri/target/universal-apple-darwin/release/bundle/macos/PDF Tutor.app" "$RUNNER_TEMP/$name"
+          name="Anagnost-$version-macos-universal.zip"
+          ditto -c -k --keepParent "src-tauri/target/universal-apple-darwin/release/bundle/macos/Anagnost.app" "$RUNNER_TEMP/$name"
           cd "$RUNNER_TEMP" && shasum -a 256 "$name" > "$name.sha256" && cat "$name.sha256"
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/PDF-Tutor-* \
-            --title "PDF Tutor ${GITHUB_REF_NAME#v}" \
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/Anagnost-* \
+            --title "Anagnost ${GITHUB_REF_NAME#v}" \
             --generate-notes \
             --verify-tag

@@ -1,6 +1,6 @@
-# PDF Tutor
+# Anagnost
 
-A local PDF reader that helps you learn what you're reading, with Claude.
+**The PDF reader your coding agent can see.** Anagnost is a local-first macOS reader for long technical documents: it maps them into sections you can study, has a tutor that knows the page you're on, and shares your reading session with Claude Code or Cursor over MCP. (*Anagnōstēs*: Greek for the reader who read texts aloud to you.)
 
 The window is laid out like VS Code: the PDF in the middle, a side bar on the left (Map, Search, Notes, Library), the tutor on the right, and a status bar. Drag the edges to resize; `⌘B` and `⌥⌘B` hide the side bars; `⌘K` opens a command palette that jumps to any section. The UI is React with [coss ui](https://coss.com/ui) components (Base UI) on Tailwind. In the tutor box, type `/` for its actions.
 
@@ -18,8 +18,8 @@ Everything is stored locally in SQLite: `~/Library/Application Support/com.alex.
 You need Xcode Command Line Tools (`xcode-select --install`), [Rust](https://rustup.rs) and [Node.js](https://nodejs.org). Then:
 
 ```bash
-git clone https://github.com/AlexShavkuta/pdf-tutor.git
-cd pdf-tutor
+git clone https://github.com/AlexShavkuta/anagnost.git
+cd anagnost
 npm run install-app
 ```
 
@@ -31,9 +31,9 @@ The app is built on your Mac and signed for it alone, so macOS opens it without 
 
 ### Updating
 
-When a new version is released, PDF Tutor shows a popup in the bottom-right corner. **Update and restart** downloads it from GitHub Releases, checks its SHA-256, replaces the app and reopens it. The app checks at launch and every 6 hours; Settings → Updates checks on demand.
+When a new version is released, Anagnost shows a popup in the bottom-right corner. **Update and restart** downloads it from GitHub Releases, checks its SHA-256, replaces the app and reopens it. The app checks at launch and every 6 hours; Settings → Updates checks on demand.
 
-You can also download the zip from the [Releases page](https://github.com/AlexShavkuta/pdf-tutor/releases). The app isn't notarized, so the first time macOS blocks a downloaded copy: right-click it → Open, or run `xattr -dr com.apple.quarantine "/Applications/PDF Tutor.app"`. Updates installed from inside the app don't need this.
+You can also download the zip from the [Releases page](https://github.com/AlexShavkuta/anagnost/releases). The app isn't notarized, so the first time macOS blocks a downloaded copy: right-click it → Open, or run `xattr -dr com.apple.quarantine "/Applications/Anagnost.app"`. Updates installed from inside the app don't need this.
 
 ### Releasing (maintainers)
 
@@ -59,15 +59,15 @@ In **Settings → Tutor and map**, choose which account answers:
 
 Keys are kept in `keys.json` in the app's data folder (`~/Library/Application Support/com.alex.pdftutor/`), readable only by your user (mode 600). The app never touches the Keychain: it's built locally and only ad-hoc signed, so the Keychain would ask for your password after every rebuild. `ANTHROPIC_API_KEY` and `CURSOR_API_KEY` in the environment work as fallbacks.
 
-`cursor-agent` is a coding agent, so PDF Tutor keeps it read-only. It runs in ask mode, in an empty temporary folder that's deleted afterwards, with a workspace config that denies shell commands and file writes, and never with `--force`. The key is passed in the environment, so it doesn't appear in the process list.
+`cursor-agent` is a coding agent, so Anagnost keeps it read-only. It runs in ask mode, in an empty temporary folder that's deleted afterwards, with a workspace config that denies shell commands and file writes, and never with `--force`. The key is passed in the environment, so it doesn't appear in the process list.
 
 Map building makes one model call per section, plus one per parent section and one for the overview, with up to 4 running at once. The cost grows with the length of the document.
 
 ## Text recognition (OCR)
 
-When a PDF has pages with no text layer, the Map view offers to recognize them. PDF Tutor renders each page and sends it to [Qianfan-OCR](https://huggingface.co/baidu/Qianfan-OCR) (a 4B document model from Baidu), running locally in llama.cpp's `llama-server`. Nothing leaves your Mac.
+When a PDF has pages with no text layer, the Map view offers to recognize them. Anagnost renders each page and sends it to [Qianfan-OCR](https://huggingface.co/baidu/Qianfan-OCR) (a 4B document model from Baidu), running locally in llama.cpp's `llama-server`. Nothing leaves your Mac.
 
-- The model loads when PDF Tutor opens and stays loaded while it's open (about 5 GB of memory); turn this off in Settings to load it on first use and unload it after 5 idle minutes. It never starts a download on its own.
+- The model loads when Anagnost opens and stays loaded while it's open (about 5 GB of memory); turn this off in Settings to load it on first use and unload it after 5 idle minutes. It never starts a download on its own.
 - Needs llama.cpp. **Settings → Text recognition → Install and load** downloads the official macOS build (about 17 MB, from ggml-org/llama.cpp releases) into the app's data folder, then downloads and loads the model. A Homebrew copy (`brew install llama.cpp`), one on your `PATH`, or a path set in Settings works too.
 - The first run downloads the model, about 4.8 GB (`ggml-org/Qianfan-OCR-GGUF`, Q8_0), into the Hugging Face cache (`~/.cache/huggingface/hub`).
 - The app starts the server when it's needed and stops it after 5 idle minutes, or when you click *OCR model loaded* in the status bar.
@@ -76,12 +76,12 @@ When a PDF has pages with no text layer, the Map view offers to recognize them. 
 
 ## Connecting Claude Code or Cursor (MCP)
 
-While PDF Tutor is open it runs an MCP server, so a coding agent can work with the PDF you have open. **Settings → Connect an agent** has the setup with your own token:
+While Anagnost is open it runs an MCP server, so a coding agent can work with the PDF you have open. **Settings → Connect an agent** has the setup with your own token:
 
-- **Claude Code**: run the `claude mcp add --transport http pdf-tutor http://127.0.0.1:7337/mcp --header "Authorization: Bearer <token>"` command once.
+- **Claude Code**: run the `claude mcp add --transport http anagnost http://127.0.0.1:7337/mcp --header "Authorization: Bearer <token>"` command once.
 - **Cursor**: click **Add to Cursor** and confirm in Cursor, or paste the JSON shown into `~/.cursor/mcp.json`. `cursor-agent` reads the same file.
 
-Then ask things like *"use pdf-tutor to map out the document I have open"* or *"quiz me on the section I'm reading"*. These run on your Claude Code or Cursor plan.
+Then ask things like *"use anagnost to map out the document I have open"* or *"quiz me on the section I'm reading"*. These run on your Claude Code or Cursor plan.
 
 | Tool | What it does |
 |---|---|

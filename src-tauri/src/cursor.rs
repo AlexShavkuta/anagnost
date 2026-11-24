@@ -270,7 +270,7 @@ struct Workspace {
 
 impl Workspace {
     fn new() -> Result<Self> {
-        let path = std::env::temp_dir().join(format!("pdf-tutor-cursor-{}", uuid::Uuid::new_v4().simple()));
+        let path = std::env::temp_dir().join(format!("anagnost-cursor-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(path.join(".cursor"))?;
         #[cfg(unix)]
         {

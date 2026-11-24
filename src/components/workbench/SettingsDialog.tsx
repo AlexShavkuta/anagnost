@@ -43,7 +43,7 @@ function UpdatesSection() {
         <p className="flex items-center gap-1.5 text-xs" aria-live="polite">
           <Spinner className="size-3.5" />
           {status.step}
-          {status.progress !== null ? ` ${Math.round(status.progress * 100)}%` : "…"} PDF Tutor restarts by itself when it's done.
+          {status.progress !== null ? ` ${Math.round(status.progress * 100)}%` : "…"} Anagnost restarts by itself when it's done.
         </p>
       ) : (
         <>
@@ -298,14 +298,14 @@ export function SettingsDialog() {
             <section className="border-t py-4">
               <h3 className="mb-0.5 font-semibold">Connect an agent</h3>
               <p className="mb-2 text-xs text-muted-foreground">
-                PDF Tutor runs an MCP server while it's open. Connect Claude Code or Cursor, then ask it about the PDF you have open: it can read the
+                Anagnost runs an MCP server while it's open. Connect Claude Code or Cursor, then ask it about the PDF you have open: it can read the
                 document, see your page and selection, move the viewer, and write to the map and notes.
               </p>
               <Choice<"claude" | "cursor"> label="Agent" value={agent} onChange={setAgent} options={[["claude", "Claude Code"], ["cursor", "Cursor"]]} />
               {agent === "claude" ? (
                 <>
                   <p className="mb-1.5 text-xs text-muted-foreground">Run this once in a terminal:</p>
-                  <CopyBlock id="mcp-cmd" text={`claude mcp add --transport http pdf-tutor ${settings.mcp_url} --header "Authorization: Bearer ${settings.mcp_token}"`} />
+                  <CopyBlock id="mcp-cmd" text={`claude mcp add --transport http anagnost ${settings.mcp_url} --header "Authorization: Bearer ${settings.mcp_token}"`} />
                 </>
               ) : (
                 <>
@@ -328,7 +328,7 @@ export function SettingsDialog() {
             <section className="border-t py-4">
               <h3 className="mb-0.5 font-semibold">Text recognition</h3>
               <p className="mb-2 text-xs text-muted-foreground">
-                Scanned pages have no text, so the tutor can't read them. PDF Tutor recognizes them on this Mac with{" "}
+                Scanned pages have no text, so the tutor can't read them. Anagnost recognizes them on this Mac with{" "}
                 <a className="text-primary hover:underline" href="https://huggingface.co/baidu/Qianfan-OCR">Qianfan-OCR</a> through llama.cpp. Nothing leaves your Mac.
               </p>
               {ocr && (
@@ -349,7 +349,7 @@ export function SettingsDialog() {
                     <Status state="bad">Last start failed: {status.message}</Status>
                   ) : status?.state === "starting" ? null : (
                     <Status state="todo">
-                      {settings.ocr_autoload ? "Model not loaded. It loads when PDF Tutor opens, once it's downloaded." : "Model not loaded. It starts when you recognize text and unloads after 5 idle minutes."}
+                      {settings.ocr_autoload ? "Model not loaded. It loads when Anagnost opens, once it's downloaded." : "Model not loaded. It starts when you recognize text and unloads after 5 idle minutes."}
                     </Status>
                   )}
                 </ul>
@@ -388,7 +388,7 @@ export function SettingsDialog() {
               <label className="mb-3 flex items-start gap-2 text-xs leading-relaxed">
                 <input type="checkbox" className="mt-0.5 size-3.5 accent-primary" checked={autoload} onChange={(e) => setAutoload(e.target.checked)} />
                 <span>
-                  Load the model when PDF Tutor opens
+                  Load the model when Anagnost opens
                   <span className="block text-muted-foreground">It then stays loaded while the app is open (uses about 5 GB of memory). Off: it loads on first use and unloads after 5 idle minutes.</span>
                 </span>
               </label>
