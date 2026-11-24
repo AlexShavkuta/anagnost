@@ -88,8 +88,21 @@ impl Updater {
 
     pub async fn check(&self) -> Result<Check> {
         let repo = repo().ok_or_else(|| anyhow!("This build doesn't know its GitHub repository."))?;
-        let resp = self
-            .http
+        // The API gives release notes, but allows only 60 anonymous requests an hour per network
+        // and sometimes refuses. The web release page has no such limit, so fall back to it.
+        let latest = match Self::latest_from_api(&self.http, repo).await {
+            Ok(latest) => latest,
+            Err(api_err) => Self::latest_from_web(&self.http, repo)
+                .await
+                .map_err(|web_err| anyhow!("{api_err:#}. The release page didn't answer either: {web_err:#}"))?,
+        };
+        let newer = latest.as_ref().is_some_and(|r| is_newer(&r.version, CURRENT));
+        *self.latest.lock().unwrap() = latest.clone();
+        Ok(Check { current: CURRENT, newer, unavailable: newer.then(unavailable).flatten(), latest })
+    }
+
+    async fn latest_from_api(http: &reqwest::Client, repo: &str) -> Result<Option<Release>> {
+        let resp = http
             .get(format!("https://api.github.com/repos/{repo}/releases/latest"))
             .header("User-Agent", "anagnost")
             .header("Accept", "application/vnd.github+json")
@@ -97,15 +110,52 @@ impl Updater {
             .send()
             .await
             .context("Could not reach GitHub")?;
-        let latest = if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            None // no releases yet
-        } else {
-            let v: Value = resp.error_for_status().context("GitHub refused the request")?.json().await?;
-            Some(parse_release(&v))
+        let status = resp.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None); // no releases yet
+        }
+        if !status.is_success() {
+            let limited = resp.headers().get("x-ratelimit-remaining").is_some_and(|v| v == "0");
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            let why = if limited || status.as_u16() == 429 {
+                "GitHub's hourly limit for update checks from this network was reached".to_string()
+            } else {
+                format!("GitHub answered {status}: {}", body["message"].as_str().unwrap_or("no details"))
+            };
+            bail!(why);
+        }
+        Ok(Some(parse_release(&resp.json().await?)))
+    }
+
+    /// github.com/<repo>/releases/latest redirects to the latest tag; the assets follow the
+    /// names CI gives them. No release notes this way.
+    async fn latest_from_web(http: &reqwest::Client, repo: &str) -> Result<Option<Release>> {
+        let no_redirects = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build()?;
+        let resp = no_redirects
+            .get(format!("https://github.com/{repo}/releases/latest"))
+            .header("User-Agent", "anagnost")
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .context("Could not reach github.com")?;
+        let location = resp.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+        let Some(tag) = location.split("/releases/tag/").nth(1).filter(|t| !t.is_empty()) else {
+            if resp.status() == reqwest::StatusCode::NOT_FOUND || location.ends_with("/releases") {
+                return Ok(None); // no releases yet
+            }
+            bail!("github.com answered {}", resp.status());
         };
-        let newer = latest.as_ref().is_some_and(|r| is_newer(&r.version, CURRENT));
-        *self.latest.lock().unwrap() = latest.clone();
-        Ok(Check { current: CURRENT, newer, unavailable: newer.then(unavailable).flatten(), latest })
+        let version = tag.trim_start_matches('v').to_string();
+        let zip = format!("https://github.com/{repo}/releases/download/{tag}/Anagnost-{version}-macos-universal.zip");
+        let exists = http
+            .head(&zip)
+            .header("User-Agent", "anagnost")
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success());
+        let asset = exists.then(|| (zip.clone(), Some(format!("{zip}.sha256"))));
+        Ok(Some(Release { version, notes: Vec::new(), url: location, downloadable: asset.is_some(), asset }))
     }
 
     /// Download and verify the latest release, then hand over to the swap script and quit.
@@ -281,6 +331,15 @@ fn bundle_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Hits github.com: cargo test -- --ignored finds_latest_release_without_the_api
+    #[tokio::test]
+    #[ignore]
+    async fn finds_latest_release_without_the_api() {
+        let r = Updater::latest_from_web(&reqwest::Client::new(), "AlexShavkuta/anagnost").await.unwrap().unwrap();
+        assert!(is_newer(&r.version, "0.2.0"), "{}", r.version);
+        assert!(r.downloadable, "{}", r.url);
+    }
 
     #[test]
     fn compares_versions() {
