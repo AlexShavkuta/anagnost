@@ -1,6 +1,6 @@
 import { ArrowUpCircle, Check, Cpu, Plug, Sparkles, Square } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { api } from "@/lib/api";
+import { api, dollars, tokens } from "@/lib/api";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +15,8 @@ export function StatusBar() {
   const pdf = useApp((s) => s.pdf);
   const page = useApp((s) => s.currentPage);
   const update = useApp((s) => s.update);
-  const { openSettings, stopOcr } = useApp.getState();
+  const mapRun = useApp((s) => s.mapRun);
+  const { openSettings, stopOcr, stopMap } = useApp.getState();
 
   let text = task?.text ?? null;
   if (ocrServer.state === "starting") {
@@ -42,6 +43,16 @@ export function StatusBar() {
           <span className={cn(item, "min-w-0")}>
             {task?.done && !ocrRun ? <Check className="size-3.5 text-success" /> : <Spinner className="size-3.5" />}
             <span className="truncate">{text}</span>
+            {mapRun?.tokens != null && (
+              <span className="shrink-0 tabular-nums" title="Tokens used by this map build, and the estimated cost at Anthropic's list prices">
+                · {tokens(mapRun.tokens)} tokens{mapRun.cost != null && ` · ${dollars(mapRun.cost)}`}
+              </span>
+            )}
+            {mapRun && !mapRun.stopping && (
+              <button onClick={stopMap} title="Stop building the map (finished sections are kept)" aria-label="Stop building the map" className="grid size-[18px] shrink-0 place-items-center rounded-sm hover:bg-accent">
+                <Square className="size-3 fill-current" />
+              </button>
+            )}
             {ocrRun && (
               <button onClick={stopOcr} title="Stop recognizing" className="grid size-[18px] place-items-center rounded-sm hover:bg-accent">
                 <Square className="size-3 fill-current" />

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Progress, ProgressIndicator, ProgressTrack } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
-import { api, cursorInstallLink, cursorMcpJson, type OcrInfo, type Provider } from "@/lib/api";
+import { api, cursorInstallLink, cursorMcpJson, MAP_MODELS, type OcrInfo, type Provider } from "@/lib/api";
 import { useApp } from "@/lib/store";
 import { IconButton } from "./common";
 
@@ -140,6 +140,7 @@ export function SettingsDialog() {
   const [provider, setProvider] = useState<Provider>("anthropic");
   const [key, setKey] = useState("");
   const [model, setModel] = useState("");
+  const [mapModel, setMapModel] = useState("claude-haiku-5-5");
   const [cursorKey, setCursorKey] = useState("");
   const [cursorModel, setCursorModel] = useState("");
   const [cursorPath, setCursorPath] = useState("");
@@ -154,6 +155,7 @@ export function SettingsDialog() {
     setProvider(settings.provider);
     setKey("");
     setModel(settings.model);
+    setMapModel(settings.map_model);
     setCursorKey("");
     setCursorModel(settings.cursor_model);
     setCursorPath(settings.cursor_agent_path);
@@ -213,6 +215,7 @@ export function SettingsDialog() {
         provider,
         apiKey: key.trim() || undefined,
         model,
+        mapModel,
         cursorApiKey: cursorKey.trim() || undefined,
         cursorModel,
         cursorAgentPath: cursorPath,
@@ -254,8 +257,20 @@ export function SettingsDialog() {
                     <FieldDescription>From console.anthropic.com.{settings.has_api_key && " A key is saved; leave this empty to keep it."}</FieldDescription>
                   </Field>
                   <Field className={field}>
-                    <FieldLabel className="text-xs sm:text-xs">Model</FieldLabel>
+                    <FieldLabel className="text-xs sm:text-xs">Tutor model</FieldLabel>
                     <Input id="model" spellCheck={false} value={model} onChange={(e) => setModel(e.target.value)} className={input} />
+                  </Field>
+                  <Field className={field}>
+                    <FieldLabel className="text-xs sm:text-xs">Map model</FieldLabel>
+                    <Choice id="map-model" label="Map model" value={mapModel} onChange={setMapModel} options={MAP_MODELS} />
+                    <FieldDescription className="-mt-2">
+                      {mapModel === "claude-haiku-5-5"
+                        ? "Fastest and cheapest: a 300-section book costs well under a dollar."
+                        : mapModel === "claude-sonnet-5-5"
+                          ? "More thorough summaries at about 20× Haiku's price."
+                          : "Most thorough, and the most expensive: about 40× Haiku's price."}{" "}
+                      You see the estimate before every build.
+                    </FieldDescription>
                   </Field>
                 </>
               ) : (

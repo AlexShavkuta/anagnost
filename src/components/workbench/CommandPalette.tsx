@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, BookOpenCheck, CornerDownLeft, FileText, FolderOpen, ListTree, NotebookPen, PanelLeft, PanelRight, RefreshCw, ScanText, Search, Settings, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, BookOpenCheck, CornerDownLeft, FileText, FolderOpen, ListTree, NotebookPen, PanelLeft, PanelRight, RefreshCw, ScanText, Square, Search, Settings, Sparkles } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import {
   Command,
@@ -57,7 +57,9 @@ export function CommandPalette() {
       { value: "search", label: "Search the document", icon: <Search />, hint: "⌘F", run: () => app.showView("search") },
       { value: "ask", label: "Ask the tutor", icon: <Sparkles />, hint: "⌘L", run: app.focusChat },
       { value: "quiz", label: "Quiz me on this section", icon: <BookOpenCheck />, run: () => app.sendChat("Quiz me on the section I'm reading. Ask one question at a time, wait for my answer, then give feedback.").catch(() => {}) },
-      { value: "map", label: "Build map with Claude", icon: <Sparkles />, run: app.buildMap },
+      useApp.getState().mapRun
+        ? { value: "stop-map", label: "Stop building the map", icon: <Square />, run: app.stopMap }
+        : { value: "map", label: "Build map with Claude", icon: <Sparkles />, run: app.buildMap },
     );
     if (missing > 0) commands.push({ value: "ocr", label: `Recognize text on ${missing} ${missing === 1 ? "page" : "pages"}`, icon: <ScanText />, run: app.recognize });
     commands.push(

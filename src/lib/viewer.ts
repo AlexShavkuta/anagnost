@@ -5,6 +5,7 @@
 // comes near the viewport (or every page you click through quickly) makes them all compete,
 // so the page you want waits behind ones you've already left, and the UI stutters.
 
+import { perf } from "./perf";
 import { pdfjs, type PDFDocumentProxy } from "./pdf";
 
 type State = { scale: number; canvas: boolean; text: boolean };
@@ -14,6 +15,8 @@ const NEAR_MARGIN = "1000px 0px";
 const KEEP_MARGIN = "3500px 0px";
 /** Cap each canvas (in device pixels) so huge or zoomed pages stay quick to paint. */
 const MAX_CANVAS_PIXELS = 12_000_000;
+/** Selectable text waits until navigation settles: building it is slow on dense pages in WebKit. */
+const TEXT_SETTLE_MS = 400;
 
 export class PageRenderer {
   private pdf: PDFDocumentProxy | null = null;
@@ -24,6 +27,8 @@ export class PageRenderer {
   private near = new Set<number>();
   /** The page the reader is on or jumping to; work closest to it goes first. */
   private focus = 1;
+  private focusAt = 0;
+  private settleTimer: number | undefined;
   private busy: { page: number; cancel(): void } | null = null;
   private nearObs: IntersectionObserver;
   private farObs: IntersectionObserver;
@@ -97,6 +102,10 @@ export class PageRenderer {
 
   /** Called as the reader scrolls. */
   setFocus(n: number) {
+    if (n !== this.focus) {
+      this.focusAt = performance.now();
+      perf.mark(`focus ${n}`);
+    }
     this.focus = n;
     // Drop work for a page the reader has jumped away from.
     if (this.busy && Math.abs(this.busy.page - n) > 2) {
@@ -120,16 +129,26 @@ export class PageRenderer {
     return lo + 1;
   }
 
-  /** The next job: canvases nearest the focus first, then text layers for the pages in view. */
+  /** The next job: canvases nearest the focus first; then, once navigation has settled,
+   *  text layers for the page in view and its neighbours. */
   private next(): { page: number; kind: "canvas" | "text" } | null {
+    const settled = performance.now() - this.focusAt >= TEXT_SETTLE_MS;
     let best: { page: number; kind: "canvas" | "text"; cost: number } | null = null;
+    let textWaiting = false;
     for (const n of this.near) {
       const st = this.states.get(n);
       const d = Math.abs(n - this.focus);
       let job: { kind: "canvas" | "text"; cost: number } | null = null;
       if (!st || st.scale !== this.scale || !st.canvas) job = { kind: "canvas", cost: d };
-      else if (!st.text && d <= 1) job = { kind: "text", cost: 2.5 + d };
+      else if (!st.text && d <= 1) {
+        if (settled) job = { kind: "text", cost: 2.5 + d };
+        else textWaiting = true;
+      }
       if (job && (!best || job.cost < best.cost)) best = { page: n, ...job };
+    }
+    if (!best && textWaiting) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = window.setTimeout(() => this.pump(), TEXT_SETTLE_MS - (performance.now() - this.focusAt) + 10);
     }
     return best;
   }
@@ -138,9 +157,11 @@ export class PageRenderer {
     if (this.busy || !this.pdf) return;
     const job = this.next();
     if (!job) return;
+    const started = performance.now();
     const run = job.kind === "canvas" ? this.drawCanvas(job.page) : this.drawText(job.page);
     const mine = this.busy;
     run.finally(() => {
+      perf.mark(`${job.kind} ${job.page} ${Math.round(performance.now() - started)}ms`);
       if (this.busy === mine) this.busy = null;
       // Yield a frame between pages so scrolling and clicks stay responsive.
       requestAnimationFrame(() => this.pump());
@@ -227,6 +248,7 @@ export class PageRenderer {
   }
 
   destroy() {
+    clearTimeout(this.settleTimer);
     this.nearObs.disconnect();
     this.farObs.disconnect();
     this.busy?.cancel();
