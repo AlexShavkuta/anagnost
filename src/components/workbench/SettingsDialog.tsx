@@ -28,66 +28,66 @@ function UpdatesSection() {
   const update = useApp((s) => s.update);
   const { checkForUpdates, startUpdate } = useApp.getState();
   useEffect(() => {
-    if (!update.info) checkForUpdates();
+    checkForUpdates();
   }, []);
-  const { info, check, checking, checkError, status } = update;
-  const version = info?.commit
-    ? `${info.commit.slice(0, 7)}${info.commit_date ? ` · ${new Date(info.commit_date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}` : ""}`
-    : "unknown";
-  const behind = check?.behind ?? 0;
+  const { check, checking, checkError, status } = update;
+  const latest = check?.latest;
 
   return (
     <section id="updates" className="border-t py-4">
       <div className="mb-2 flex items-baseline justify-between gap-3">
         <h3 className="font-semibold">Updates</h3>
-        <span className="font-mono text-[11px] text-muted-foreground">{version}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">Version {check?.current ?? "…"}</span>
       </div>
       {status.state === "running" ? (
-        <div aria-live="polite">
-          <div className="mb-1.5 flex items-center gap-1.5 text-xs"><Spinner className="size-3.5" />{status.step}…</div>
-          <p className="mt-1.5 text-xs text-muted-foreground">Keep working; PDF Tutor closes and reopens itself when the new version is built.</p>
-        </div>
+        <p className="flex items-center gap-1.5 text-xs" aria-live="polite">
+          <Spinner className="size-3.5" />
+          {status.step}
+          {status.progress !== null ? ` ${Math.round(status.progress * 100)}%` : "…"} PDF Tutor restarts by itself when it's done.
+        </p>
       ) : (
         <>
-          {status.state === "error" && (
-            <pre className="mb-3 max-h-40 overflow-auto rounded-lg border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-destructive-foreground select-text">{status.message}</pre>
-          )}
+          {status.state === "error" && <ul className="mb-2"><Status state="bad">{status.message}</Status></ul>}
           {checkError ? (
             <ul className="mb-3"><Status state="bad">{checkError}</Status></ul>
           ) : checking && !check ? (
             <p className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="size-3.5" />Checking GitHub…</p>
-          ) : check && behind === 0 ? (
-            <ul className="mb-3"><Status state="ok">You have the latest version.</Status></ul>
-          ) : check ? (
+          ) : check?.newer && latest ? (
             <div className="mb-3">
-              <p className="mb-1.5 text-xs">New in this update:</p>
-              <ul className="mb-1 list-disc pl-5 text-xs leading-relaxed text-muted-foreground">
-                {check.commits.length === 0 && <li>Maintenance changes</li>}
-                {check.commits.slice(0, 5).map((c) => <li key={c.sha}>{c.message}</li>)}
-                {check.commits.length > 5 && <li>and {check.commits.length - 5} more</li>}
-              </ul>
-            </div>
-          ) : null}
-          {info?.unavailable ? (
-            <p className="text-xs text-muted-foreground">{info.unavailable}</p>
-          ) : (
-            <div className="flex items-center gap-3">
-              {behind > 0 ? (
-                <Button type="button" size="sm" onClick={startUpdate}>Update and restart</Button>
-              ) : (
-                <Button type="button" variant="outline" size="sm" disabled={checking} onClick={() => checkForUpdates()}>Check for updates</Button>
+              <p className="mb-1 text-xs">Version {latest.version} is available.</p>
+              {latest.notes.length > 0 && (
+                <ul className="list-disc pl-5 text-xs leading-relaxed text-muted-foreground">
+                  {latest.notes.map((n) => <li key={n}>{n}</li>)}
+                </ul>
               )}
-              <span className="text-xs text-muted-foreground">
-                {behind > 0
-                  ? "Pulls and rebuilds from your clone (a few minutes). Tutor conversations aren't kept."
-                  : info?.source && <>Builds from <code className={code}>{info.source}</code></>}
-              </span>
+              {check.unavailable && <p className="mt-1 text-xs text-muted-foreground">{check.unavailable}</p>}
             </div>
-          )}
+          ) : check ? (
+            <ul className="mb-3"><Status state="ok">{latest ? "You have the latest version." : "No releases published yet."}</Status></ul>
+          ) : null}
+          <div className="flex items-center gap-3">
+            {check?.newer && latest?.downloadable && !check.unavailable ? (
+              <Button type="button" size="sm" onClick={startUpdate}>Update and restart</Button>
+            ) : (
+              <Button type="button" variant="outline" size="sm" disabled={checking} onClick={() => checkForUpdates()}>Check for updates</Button>
+            )}
+            {latest && (
+              <button type="button" className="text-xs text-primary hover:underline" onClick={() => openUrl(latest.url)}>Release notes</button>
+            )}
+          </div>
         </>
       )}
     </section>
   );
+}
+
+function cursorModelNote(model: string, models: { list: string[]; error: string } | null) {
+  const m = model.trim();
+  if (!models) return "Leave empty for Cursor's default. Loading the models your account can use…";
+  if (models.error) return "Leave empty for Cursor's default. (Couldn't list your models: save a Cursor key first.)";
+  if (m && models.list.length > 0 && !models.list.includes(m))
+    return <span className="text-destructive-foreground">Cursor doesn't offer "{m}" on this account. Pick one from the suggestions, or leave it empty.</span>;
+  return `Leave empty for Cursor's default, or pick one of the ${models.list.length} models your account can use.`;
 }
 
 function CopyBlock({ id, text }: { id?: string; text: string }) {
@@ -143,7 +143,9 @@ export function SettingsDialog() {
   const [cursorKey, setCursorKey] = useState("");
   const [cursorModel, setCursorModel] = useState("");
   const [cursorPath, setCursorPath] = useState("");
+  const [cursorModels, setCursorModels] = useState<{ list: string[]; error: string } | null>(null);
   const [llama, setLlama] = useState("");
+  const [autoload, setAutoload] = useState(true);
   const [ocr, setOcr] = useState<OcrInfo | null>(null);
   const [agent, setAgent] = useState<"claude" | "cursor">("claude");
 
@@ -156,6 +158,7 @@ export function SettingsDialog() {
     setCursorModel(settings.cursor_model);
     setCursorPath(settings.cursor_agent_path);
     setLlama(settings.llama_server_path);
+    setAutoload(settings.ocr_autoload);
     if (focus === "mcp-cursor") setAgent("cursor");
     api.ocrInfo().then(setOcr);
     if (focus) {
@@ -174,6 +177,20 @@ export function SettingsDialog() {
   useEffect(() => {
     if (open) api.ocrInfo().then(setOcr);
   }, [open, ocrStep]);
+
+  // What the saved Cursor key can use, so the Model field can only suggest real names.
+  useEffect(() => {
+    if (!open || provider !== "cursor" || !settings?.cursor_agent) return;
+    let live = true;
+    setCursorModels(null);
+    api.cursorModels().then(
+      (list) => live && setCursorModels({ list, error: "" }),
+      (e) => live && setCursorModels({ list: [], error: String(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, provider, settings?.cursor_agent, settings?.has_cursor_key]);
 
   if (!settings) return null;
   const status = ocrServer.state !== "stopped" ? ocrServer : ocr?.status;
@@ -200,6 +217,7 @@ export function SettingsDialog() {
         cursorModel,
         cursorAgentPath: cursorPath,
         llamaServerPath: llama,
+        ocrAutoload: autoload,
       });
       await loadSettings();
       useApp.setState({ chatError: "" });
@@ -252,9 +270,12 @@ export function SettingsDialog() {
                   </Field>
                   <Field className={field}>
                     <FieldLabel className="text-xs sm:text-xs">Model</FieldLabel>
-                    <Input id="cursor-model" spellCheck={false} placeholder="Cursor's default" value={cursorModel} onChange={(e) => setCursorModel(e.target.value)} className={input} />
+                    <Input id="cursor-model" list="cursor-model-list" spellCheck={false} autoComplete="off" placeholder="Cursor's default" value={cursorModel} onChange={(e) => setCursorModel(e.target.value)} className={input} />
+                    <datalist id="cursor-model-list">
+                      {cursorModels?.list.map((m) => <option key={m} value={m} />)}
+                    </datalist>
                     <FieldDescription>
-                      Any model your plan offers, e.g. <code className={code}>sonnet-4.5</code> or <code className={code}>gpt-5</code>. Leave empty for Cursor's default.
+                      {cursorModelNote(cursorModel, cursorModels)}
                     </FieldDescription>
                   </Field>
                   <ul className="mt-3 mb-3">
@@ -327,7 +348,9 @@ export function SettingsDialog() {
                   ) : status?.state === "error" ? (
                     <Status state="bad">Last start failed: {status.message}</Status>
                   ) : status?.state === "starting" ? null : (
-                    <Status state="todo">Model not loaded. It starts when you recognize text and unloads after 5 idle minutes.</Status>
+                    <Status state="todo">
+                      {settings.ocr_autoload ? "Model not loaded. It loads when PDF Tutor opens, once it's downloaded." : "Model not loaded. It starts when you recognize text and unloads after 5 idle minutes."}
+                    </Status>
                   )}
                 </ul>
               )}
@@ -362,6 +385,13 @@ export function SettingsDialog() {
                   )}
                 </div>
               )}
+              <label className="mb-3 flex items-start gap-2 text-xs leading-relaxed">
+                <input type="checkbox" className="mt-0.5 size-3.5 accent-primary" checked={autoload} onChange={(e) => setAutoload(e.target.checked)} />
+                <span>
+                  Load the model when PDF Tutor opens
+                  <span className="block text-muted-foreground">It then stays loaded while the app is open (uses about 5 GB of memory). Off: it loads on first use and unloads after 5 idle minutes.</span>
+                </span>
+              </label>
               <Field className={field}>
                 <FieldLabel className="text-xs sm:text-xs">llama-server path</FieldLabel>
                 <Input id="llama-path" spellCheck={false} placeholder="/opt/homebrew/bin/llama-server" value={llama} onChange={(e) => setLlama(e.target.value)} className={input} />

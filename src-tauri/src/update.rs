@@ -1,85 +1,79 @@
-//! Self-update for copies built from a git clone with scripts/install-macos.sh:
-//! the build bakes in the clone's folder and commit. "Check" fetches the clone's remote;
-//! "Update" runs git pull and the install script in a detached process, which replaces
-//! the app and opens it again.
+//! Updates from GitHub Releases. CI (.github/workflows/release.yml) attaches a zipped app and
+//! its SHA-256 to every `v*` release. The app compares the latest release with its own version;
+//! "Update" downloads the zip, checks it, and a small detached script swaps the app bundle once
+//! this process has quit, then opens the new version.
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
-const SOURCE: &str = env!("PDF_TUTOR_SOURCE");
-const COMMIT: &str = env!("PDF_TUTOR_COMMIT");
-const COMMIT_DATE: &str = env!("PDF_TUTOR_COMMIT_DATE");
-const BRANCH: &str = "main";
+pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
+const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+const BUNDLE_ID: &str = "com.alex.pdftutor";
 
-const SCRIPT: &str = r#"#!/bin/bash
-# Written by PDF Tutor's Update button. $1: source folder, $2: the app to reopen.
-set -euo pipefail
-# Apps opened from Finder don't get the shell's PATH; borrow the login shell's.
-PATH="$(/bin/zsh -lc 'printf %s "$PATH"' 2>/dev/null || true):$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-export PATH
-cd "$1"
-echo "::step Downloading the update"
-git pull --ff-only origin main
-echo "::step Building (this takes a few minutes)"
-bash scripts/install-macos.sh
-echo "::step Restarting"
+const SWAP_SCRIPT: &str = r#"#!/bin/bash
+# Written by PDF Tutor's updater. $1: new app, $2: app to replace, $3: pid to wait for.
+set -u
+for _ in $(seq 1 60); do kill -0 "$3" 2>/dev/null || break; sleep 0.5; done
+rm -rf "$2.updating"
+ditto "$1" "$2.updating" || exit 1
+rm -rf "$2" && mv "$2.updating" "$2"
+xattr -dr com.apple.quarantine "$2" 2>/dev/null
 open "$2"
 "#;
 
-#[derive(Serialize)]
-pub struct Info {
-    pub commit: &'static str,
-    pub commit_date: &'static str,
-    pub source: &'static str,
-    /// Why updating from inside the app won't work, if it won't.
-    pub unavailable: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct Commit {
-    pub sha: String,
-    pub message: String,
+#[derive(Serialize, Clone)]
+pub struct Release {
+    pub version: String,
+    /// The release's bullet points, without PR links.
+    pub notes: Vec<String>,
+    pub url: String,
+    #[serde(skip)]
+    asset: Option<(String, Option<String>)>,
+    pub downloadable: bool,
 }
 
 #[derive(Serialize)]
 pub struct Check {
-    /// New commits on GitHub that this build doesn't have, newest first.
-    pub commits: Vec<Commit>,
-    pub behind: u64,
+    pub current: &'static str,
+    pub latest: Option<Release>,
+    pub newer: bool,
+    /// Why "Update" can't install it from inside the app, if it can't.
+    pub unavailable: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Status {
     Idle,
-    Running { step: String },
+    /// `progress` is 0..1 while downloading.
+    Running { step: String, progress: Option<f64> },
     Error { message: String },
 }
 
 pub struct Updater {
     app: AppHandle,
-    log_path: PathBuf,
-    script_path: PathBuf,
+    dir: PathBuf,
+    http: reqwest::Client,
     status: Mutex<Status>,
+    latest: Mutex<Option<Release>>,
 }
 
 impl Updater {
     pub fn new(app: AppHandle, data_dir: &Path) -> Self {
         Self {
             app,
-            log_path: data_dir.join("update.log"),
-            script_path: data_dir.join("update.sh"),
+            dir: data_dir.join("update"),
+            http: reqwest::Client::new(),
             status: Mutex::new(Status::Idle),
+            latest: Mutex::new(None),
         }
-    }
-
-    pub fn info(&self) -> Info {
-        Info { commit: COMMIT, commit_date: COMMIT_DATE, source: SOURCE, unavailable: unavailable() }
     }
 
     pub fn status(&self) -> Status {
@@ -91,27 +85,29 @@ impl Updater {
         let _ = self.app.emit("update-status", s);
     }
 
-    /// Fetch the clone's remote and list the commits on main that this build doesn't have.
     pub async fn check(&self) -> Result<Check> {
-        if let Some(why) = unavailable() {
-            bail!(why);
-        }
-        if COMMIT.is_empty() {
-            bail!("This copy doesn't know which commit it was built from.");
-        }
-        git(&["fetch", "--quiet", "origin", BRANCH]).await.context("Could not fetch updates")?;
-        let range = format!("{COMMIT}..origin/{BRANCH}");
-        let behind = git(&["rev-list", "--count", &range]).await?.trim().parse().unwrap_or(0);
-        let log = git(&["log", "--no-merges", "--format=%H%x09%s", &range]).await?;
-        let commits = log
-            .lines()
-            .filter_map(|l| l.split_once('\t'))
-            .map(|(sha, message)| Commit { sha: sha.into(), message: message.into() })
-            .collect();
-        Ok(Check { behind, commits })
+        let repo = repo().ok_or_else(|| anyhow!("This build doesn't know its GitHub repository."))?;
+        let resp = self
+            .http
+            .get(format!("https://api.github.com/repos/{repo}/releases/latest"))
+            .header("User-Agent", "pdf-tutor")
+            .header("Accept", "application/vnd.github+json")
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .context("Could not reach GitHub")?;
+        let latest = if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            None // no releases yet
+        } else {
+            let v: Value = resp.error_for_status().context("GitHub refused the request")?.json().await?;
+            Some(parse_release(&v))
+        };
+        let newer = latest.as_ref().is_some_and(|r| is_newer(&r.version, CURRENT));
+        *self.latest.lock().unwrap() = latest.clone();
+        Ok(Check { current: CURRENT, newer, unavailable: newer.then(unavailable).flatten(), latest })
     }
 
-    /// Start the update in a process that outlives this app (the install script quits it).
+    /// Download and verify the latest release, then hand over to the swap script and quit.
     pub fn start(&self) -> Result<()> {
         if matches!(self.status(), Status::Running { .. }) {
             return Ok(());
@@ -119,94 +115,146 @@ impl Updater {
         if let Some(why) = unavailable() {
             bail!(why);
         }
-        let bundle = bundle_path().ok_or_else(|| anyhow!("PDF Tutor isn't running from an installed app."))?;
-        std::fs::write(&self.script_path, SCRIPT)?;
-        let log = std::fs::File::create(&self.log_path)?;
-        let mut cmd = std::process::Command::new("/bin/bash");
-        cmd.env("PDF_TUTOR_PID", std::process::id().to_string())
-            .arg(&self.script_path)
-            .arg(SOURCE)
-            .arg(&bundle)
-            .stdin(Stdio::null())
-            .stdout(log.try_clone()?)
-            .stderr(log);
-        // Its own process group, so quitting the app doesn't take the update down with it.
-        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-        let mut child = cmd.spawn().context("could not start the update")?;
-        self.set_status(Status::Running { step: "Starting the update".into() });
-
-        let log_path = self.log_path.clone();
+        let release = self.latest.lock().unwrap().clone().ok_or_else(|| anyhow!("Check for updates first."))?;
+        let (zip_url, sha_url) = release.asset.clone().ok_or_else(|| anyhow!("This release has no macOS download."))?;
+        self.set_status(Status::Running { step: "Downloading".into(), progress: Some(0.0) });
         let app = self.app.clone();
-        std::thread::spawn(move || {
-            let updater = app.state::<std::sync::Arc<crate::state::AppState>>();
-            let updater = &updater.updater;
-            loop {
-                let log = std::fs::read_to_string(&log_path).unwrap_or_default();
-                if let Some(step) = log.lines().rev().find_map(|l| l.strip_prefix("::step ")) {
-                    if step == "Installing" {
-                        // The new build is ready; get out of the way so it can replace this one.
-                        app.exit(0);
-                        return;
-                    }
-                    if !matches!(updater.status(), Status::Running { step: ref s } if s == step) {
-                        updater.set_status(Status::Running { step: step.to_string() });
-                    }
+        tauri::async_runtime::spawn(async move {
+            let state = tauri::Manager::state::<std::sync::Arc<crate::state::AppState>>(&app);
+            let me = &state.updater;
+            match me.install(&zip_url, sha_url.as_deref()).await {
+                Ok(()) => {
+                    me.set_status(Status::Running { step: "Restarting".into(), progress: None });
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    app.exit(0);
                 }
-                match child.try_wait() {
-                    Ok(Some(code)) => {
-                        if code.success() {
-                            updater.set_status(Status::Error {
-                                message: "The update is installed. Quit and reopen PDF Tutor to use it.".into(),
-                            });
-                        } else {
-                            let tail: Vec<&str> = log.lines().filter(|l| !l.trim().is_empty()).collect();
-                            let tail = tail[tail.len().saturating_sub(8)..].join("\n");
-                            updater.set_status(Status::Error { message: format!("The update failed.\n{tail}") });
-                        }
-                        break;
-                    }
-                    Ok(None) => std::thread::sleep(Duration::from_millis(800)),
-                    Err(e) => {
-                        updater.set_status(Status::Error { message: format!("Lost track of the update: {e}") });
-                        break;
-                    }
-                }
+                Err(e) => me.set_status(Status::Error { message: format!("{e:#}") }),
             }
         });
         Ok(())
     }
+
+    async fn install(&self, zip_url: &str, sha_url: Option<&str>) -> Result<()> {
+        let bundle = bundle_path().ok_or_else(|| anyhow!("PDF Tutor isn't running from an installed app."))?;
+        let _ = std::fs::remove_dir_all(&self.dir);
+        std::fs::create_dir_all(&self.dir)?;
+        let zip = self.dir.join("PDF Tutor.zip");
+
+        let mut resp = self.http.get(zip_url).header("User-Agent", "pdf-tutor").timeout(Duration::from_secs(900)).send().await?.error_for_status()?;
+        let total = resp.content_length().unwrap_or(0);
+        let mut file = tokio::fs::File::create(&zip).await?;
+        let mut hash = Sha256::new();
+        let mut done = 0u64;
+        while let Some(chunk) = resp.chunk().await? {
+            tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await?;
+            hash.update(&chunk);
+            done += chunk.len() as u64;
+            if total > 0 {
+                self.set_status(Status::Running { step: "Downloading".into(), progress: Some(done as f64 / total as f64) });
+            }
+        }
+        tokio::io::AsyncWriteExt::flush(&mut file).await?;
+        drop(file);
+
+        self.set_status(Status::Running { step: "Installing".into(), progress: None });
+        if let Some(sha_url) = sha_url {
+            let expected = self.http.get(sha_url).header("User-Agent", "pdf-tutor").send().await?.error_for_status()?.text().await?;
+            let expected = expected.split_whitespace().next().unwrap_or_default().to_lowercase();
+            if hex::encode(hash.finalize()) != expected {
+                bail!("The download is damaged (checksum mismatch). Try again.");
+            }
+        }
+        let unpacked = self.dir.join("unpacked");
+        run("/usr/bin/ditto", &["-x", "-k", path(&zip), path(&unpacked)]).await.context("could not unpack the update")?;
+        let new_app = std::fs::read_dir(&unpacked)?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|e| e == "app"))
+            .ok_or_else(|| anyhow!("the download has no app in it"))?;
+        let plist = std::fs::read_to_string(new_app.join("Contents/Info.plist")).unwrap_or_default();
+        if !plist.contains(&format!("<string>{BUNDLE_ID}</string>")) {
+            bail!("the download isn't PDF Tutor");
+        }
+        run("/usr/bin/codesign", &["--verify", "--deep", path(&new_app)]).await.context("the downloaded app's signature is invalid")?;
+
+        let script = self.dir.join("swap.sh");
+        std::fs::write(&script, SWAP_SCRIPT)?;
+        let log = std::fs::File::create(self.dir.join("swap.log"))?;
+        let mut cmd = std::process::Command::new("/bin/bash");
+        cmd.arg(&script)
+            .arg(&new_app)
+            .arg(&bundle)
+            .arg(std::process::id().to_string())
+            .stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log);
+        // Its own process group, so it outlives this app.
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        cmd.spawn().context("could not start the installer")?;
+        Ok(())
+    }
 }
 
+fn path(p: &Path) -> &str {
+    p.to_str().unwrap_or_default()
+}
 
-/// Run git in the source folder; never prompts (a prompt would hang with no terminal).
-async fn git(args: &[&str]) -> Result<String> {
-    let out = tokio::process::Command::new("/usr/bin/git")
-        .arg("-C")
-        .arg(SOURCE)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .kill_on_drop(true)
-        .output();
-    let out = tokio::time::timeout(Duration::from_secs(60), out).await.context("git timed out")??;
+async fn run(program: &str, args: &[&str]) -> Result<()> {
+    let out = tokio::process::Command::new(program).args(args).output().await?;
     if !out.status.success() {
         bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(())
+}
+
+/// "https://github.com/owner/repo" -> "owner/repo"
+fn repo() -> Option<&'static str> {
+    REPOSITORY.strip_prefix("https://github.com/").map(|r| r.trim_end_matches('/')).filter(|r| r.contains('/'))
+}
+
+fn parse_release(v: &Value) -> Release {
+    let version = v["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
+    let notes = v["body"]
+        .as_str()
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("* ").or_else(|| l.trim().strip_prefix("- ")))
+        .map(|l| l.split(" by @").next().unwrap_or(l).trim().to_string())
+        .filter(|l| !l.is_empty())
+        .take(6)
+        .collect();
+    let assets: Vec<(&str, &str)> = v["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| Some((a["name"].as_str()?, a["browser_download_url"].as_str()?)))
+        .collect();
+    let asset = assets.iter().find(|(n, _)| n.contains("macos") && n.ends_with(".zip")).map(|(name, url)| {
+        let sha = assets.iter().find(|(n, _)| *n == format!("{name}.sha256")).map(|(_, u)| u.to_string());
+        (url.to_string(), sha)
+    });
+    Release { version, notes, url: v["html_url"].as_str().unwrap_or_default().to_string(), downloadable: asset.is_some(), asset }
+}
+
+/// Plain x.y.z comparison; a missing or odd part counts as 0.
+fn is_newer(candidate: &str, current: &str) -> bool {
+    let parts = |s: &str| -> Vec<u64> { s.split(['.', '-']).take(3).map(|p| p.parse().unwrap_or(0)).collect() };
+    parts(candidate) > parts(current)
 }
 
 fn unavailable() -> Option<String> {
-    let src = Path::new(SOURCE);
-    if !src.join(".git").exists() || !src.join("scripts/install-macos.sh").is_file() {
-        return Some(format!(
-            "The source folder this copy was built from ({SOURCE}) isn't there anymore. \
-             Clone the repo again and run npm run install-app."
-        ));
-    }
-    if bundle_path().is_none() {
+    let Some(bundle) = bundle_path() else {
         return Some("Updating works in the installed app, not in development builds.".into());
+    };
+    let parent = bundle.parent()?;
+    let probe = parent.join(".pdf-tutor-write-test");
+    match std::fs::write(&probe, b"") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(probe);
+            None
+        }
+        Err(_) => Some(format!("PDF Tutor can't replace itself in {} (no write access). Download the new version from GitHub instead.", parent.display())),
     }
-    None
 }
 
 /// …/PDF Tutor.app for the running executable, if it is inside an app bundle.
@@ -214,4 +262,34 @@ fn bundle_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let bundle = exe.parent()?.parent()?.parent()?;
     (bundle.extension()? == "app").then(|| bundle.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compares_versions() {
+        assert!(is_newer("0.2.0", "0.1.0"));
+        assert!(is_newer("0.10.0", "0.9.3"));
+        assert!(!is_newer("0.2.0", "0.2.0"));
+        assert!(!is_newer("0.1.9", "0.2.0"));
+    }
+
+    #[test]
+    fn reads_generated_release_notes_and_assets() {
+        let v = serde_json::json!({
+            "tag_name": "v0.3.0",
+            "html_url": "https://github.com/o/r/releases/tag/v0.3.0",
+            "body": "## What's Changed\n* Faster page jumps by @someone in https://github.com/o/r/pull/3\n* Update popup by @someone in https://github.com/o/r/pull/4\n\n**Full Changelog**: https://github.com/o/r/compare/v0.2.0...v0.3.0",
+            "assets": [
+                {"name": "PDF-Tutor-0.3.0-macos-universal.zip", "browser_download_url": "https://x/a.zip"},
+                {"name": "PDF-Tutor-0.3.0-macos-universal.zip.sha256", "browser_download_url": "https://x/a.zip.sha256"}
+            ]
+        });
+        let r = parse_release(&v);
+        assert_eq!(r.version, "0.3.0");
+        assert_eq!(r.notes, ["Faster page jumps", "Update popup"]);
+        assert_eq!(r.asset, Some(("https://x/a.zip".into(), Some("https://x/a.zip.sha256".into()))));
+    }
 }

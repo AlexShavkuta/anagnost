@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { Channel } from "@tauri-apps/api/core";
 import { ask, message, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toastManager } from "@/components/ui/toast";
-import { api, providerProblem, type ChatMsg, type Doc, type Note, type OcrStatus, type Section, type Settings, type TextStatus, type UpdateCheck, type UpdateInfo, type UpdateStatus } from "./api";
+import { api, providerProblem, type ChatMsg, type Doc, type Note, type OcrStatus, type Section, type Settings, type TextStatus, type UpdateCheck, type UpdateStatus } from "./api";
 import { extractOutline, extractText, loadPdf, pageImage, pdfTitle, type PDFDocumentProxy } from "./pdf";
 import { load, save } from "./persist";
 
@@ -46,7 +46,8 @@ interface State {
   mapRun: { done: number; total: number } | null;
   ocrRun: { done: number; total: number; cancelled: boolean } | null;
   ocrServer: OcrStatus;
-  update: { info: UpdateInfo | null; check: UpdateCheck | null; checking: boolean; checkError: string; status: UpdateStatus };
+  /** `dismissed`: the version whose popup the reader closed this session. */
+  update: { check: UpdateCheck | null; checking: boolean; checkError: string; status: UpdateStatus; dismissed: string | null };
   expanded: Set<number>;
 }
 
@@ -83,6 +84,7 @@ interface Actions {
   /** Ask GitHub for new commits; `quiet` keeps errors out of the UI (the launch check). */
   checkForUpdates(quiet?: boolean): Promise<void>;
   startUpdate(): Promise<void>;
+  dismissUpdate(): void;
   setUpdateStatus(s: UpdateStatus): void;
   setMapProgress(done: number, total: number, current: string): void;
   flash(text: string): void;
@@ -136,7 +138,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   mapRun: null,
   ocrRun: null,
   ocrServer: { state: "stopped" },
-  update: { info: null, check: null, checking: false, checkError: "", status: { state: "idle" } },
+  update: { check: null, checking: false, checkError: "", status: { state: "idle" }, dismissed: null },
   expanded: new Set(),
 
   async init() {
@@ -374,12 +376,15 @@ export const useApp = create<State & Actions>()((set, get) => ({
     if (up().checking) return;
     set({ update: { ...up(), checking: true, checkError: "" } });
     try {
-      const [info, check, status] = await Promise.all([api.updateInfo(), api.checkUpdate(), api.updateStatus()]);
-      set({ update: { ...up(), info, check, status, checking: false } });
+      const [check, status] = await Promise.all([api.checkUpdate(), api.updateStatus()]);
+      set({ update: { ...up(), check, status: status ?? { state: "idle" }, checking: false } });
     } catch (e) {
-      const info = await api.updateInfo().catch(() => null);
-      set({ update: { ...up(), info, checking: false, checkError: quiet ? "" : String(e) } });
+      set({ update: { ...up(), checking: false, checkError: quiet ? "" : String(e) } });
     }
+  },
+  dismissUpdate() {
+    const v = get().update.check?.latest?.version ?? null;
+    set({ update: { ...get().update, dismissed: v } });
   },
   async startUpdate() {
     try {

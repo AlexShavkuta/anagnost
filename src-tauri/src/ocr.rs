@@ -60,6 +60,9 @@ pub struct Ocr {
     server: tokio::sync::Mutex<Option<Server>>,
     status: Mutex<Status>,
     last_used: Mutex<Instant>,
+    /// Settings' "Load when PDF Tutor opens": then the model also stays loaded instead of
+    /// unloading after a few idle minutes.
+    keep_loaded: std::sync::atomic::AtomicBool,
     log: Arc<Mutex<VecDeque<String>>>,
 }
 
@@ -73,6 +76,7 @@ impl Ocr {
             server: tokio::sync::Mutex::new(None),
             status: Mutex::new(Status::Stopped),
             last_used: Mutex::new(Instant::now()),
+            keep_loaded: std::sync::atomic::AtomicBool::new(false),
             log: Arc::new(Mutex::new(VecDeque::new())),
         });
         let weak = Arc::downgrade(&ocr);
@@ -80,7 +84,8 @@ impl Ocr {
             loop {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 let Some(ocr) = weak.upgrade() else { break };
-                let idle = ocr.last_used.lock().unwrap().elapsed() > IDLE_STOP;
+                let idle = ocr.last_used.lock().unwrap().elapsed() > IDLE_STOP
+                    && !ocr.keep_loaded.load(std::sync::atomic::Ordering::Relaxed);
                 if idle && *ocr.status.lock().unwrap() == Status::Ready {
                     ocr.stop().await;
                 }
@@ -95,6 +100,19 @@ impl Ocr {
             model: MODEL,
             downloaded: model_downloaded(),
             status: self.status.lock().unwrap().clone(),
+        }
+    }
+
+    pub fn set_keep_loaded(&self, on: bool) {
+        self.keep_loaded.store(on, std::sync::atomic::Ordering::Relaxed);
+        *self.last_used.lock().unwrap() = Instant::now();
+    }
+
+    /// Load the model now if everything is already on this Mac; never starts a download.
+    pub async fn autoload(&self, configured: Option<&str>) {
+        if self.binary(configured).is_some() && model_downloaded() {
+            let _ = self.ensure_running(configured).await;
+            *self.last_used.lock().unwrap() = Instant::now();
         }
     }
 

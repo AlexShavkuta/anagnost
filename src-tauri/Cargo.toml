@@ -1,6 +1,7 @@
 [package]
 name = "pdf-tutor"
 version = "0.1.0"
+repository = "https://github.com/AlexShavkuta/pdf-tutor"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
@@ -32,7 +33,6 @@ anyhow = "1.0.104"
 sha2 = "0.11.1"
 hex = "0.4.3"
 uuid = { version = "1.29.3", features = ["v4"] }
-keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

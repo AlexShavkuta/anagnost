@@ -216,7 +216,10 @@ function Viewer() {
       frame = requestAnimationFrame(() => {
         frame = 0;
         const p = renderer.current?.visiblePage();
-        if (p) useApp.getState().setCurrentPage(p);
+        if (p) {
+          renderer.current!.setFocus(p);
+          useApp.getState().setCurrentPage(p);
+        }
       });
     };
     const onSelection = () => {

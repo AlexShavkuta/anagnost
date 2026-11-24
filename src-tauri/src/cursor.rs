@@ -120,16 +120,70 @@ impl Cursor {
         let stderr = strip_ansi(&err_task.await.unwrap_or_default());
 
         if let Some(f) = failure {
-            bail!("Cursor: {f}");
+            bail!(self.explain(&f, status.code()));
         }
         if let Some(r) = result {
             return Ok(r);
         }
         if !status.success() || streamed.is_empty() {
-            bail!(friendly_error(stderr.trim(), status.code()));
+            bail!(self.explain(stderr.trim(), status.code()));
         }
         Ok(streamed)
     }
+}
+
+impl Cursor {
+    fn explain(&self, message: &str, code: Option<i32>) -> String {
+        if is_model_error(message) {
+            let model = self.model.as_deref().unwrap_or("the default model");
+            return format!(
+                "Cursor can't use the model \"{model}\" with this account. Pick one from the list in \
+                 Settings → Model provider, or leave Model empty to use Cursor's default."
+            );
+        }
+        friendly_error(message, code)
+    }
+
+    /// The model names this account can use (`cursor-agent models`).
+    pub async fn models(&self) -> Result<Vec<String>> {
+        let mut cmd = Command::new(&self.binary);
+        cmd.arg("models").env("NO_OPEN_BROWSER", "1").stdin(Stdio::null()).kill_on_drop(true);
+        if let Some(k) = &self.api_key {
+            cmd.env("CURSOR_API_KEY", k);
+        }
+        let out = tokio::time::timeout(Duration::from_secs(60), cmd.output()).await.context("cursor-agent timed out")??;
+        let stdout = strip_ansi(&String::from_utf8_lossy(&out.stdout));
+        if !out.status.success() {
+            let stderr = strip_ansi(&String::from_utf8_lossy(&out.stderr));
+            bail!(friendly_error(stderr.trim(), out.status.code()));
+        }
+        Ok(parse_models(&stdout))
+    }
+}
+
+/// cursor-agent rejects an unknown or unavailable model with a list of the ones it accepts.
+fn is_model_error(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    lower.contains("available models") || (lower.contains("model") && (lower.contains("cannot use") || lower.contains("not available") || lower.contains("invalid model") || lower.contains("unknown model")))
+}
+
+/// Model ids from `cursor-agent models`: one per line, the id first, optionally followed by
+/// " - Display name" and markers like "(current)". Headers and hints are skipped.
+fn parse_models(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim().trim_start_matches(['-', '*', '•']).trim();
+        let Some(id) = line.split_whitespace().next() else { continue };
+        let id = id.trim_end_matches([',', ':']);
+        let ok = id.len() > 1
+            && id.chars().any(|c| c.is_ascii_lowercase())
+            && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || ".-_:[]=".contains(c))
+            && !line.ends_with(':');
+        if ok && !out.iter().any(|m| m == id) {
+            out.push(id.to_string());
+        }
+    }
+    out
 }
 
 /// Flatten the system prompt and the conversation into one prompt for the agent.
@@ -257,6 +311,14 @@ pub fn find_binary(configured: Option<&str>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spots_model_errors_and_parses_model_lists() {
+        assert!(is_model_error("Cannot use this model: foo. Available models: auto, gpt-5, sonnet-4.5"));
+        assert!(!is_model_error("The provided API key is invalid."));
+        let list = "Available models\n\nauto - Auto (current)\ngpt-5.1 - GPT-5.1\nclaude-4.5-sonnet-thinking - Sonnet 4.5 Thinking\n\nTip: use --model <id> to switch.";
+        assert_eq!(parse_models(list), ["auto", "gpt-5.1", "claude-4.5-sonnet-thinking"]);
+    }
     use serde_json::json;
 
     fn req(messages: Vec<Value>, schema: Option<Value>) -> Request {

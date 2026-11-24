@@ -95,13 +95,15 @@ impl AppState {
                     .ok_or_else(|| anyhow!("No Anthropic API key set. Add one in Settings, or switch the provider to Cursor."))?;
                 Ok(Llm::Claude(Claude::new(key, self.setting("model"))))
             }
-            Provider::Cursor => {
-                let path = self.setting("cursor_agent_path");
-                let binary = crate::cursor::find_binary(path.as_deref()).ok_or_else(|| {
-                    anyhow!("cursor-agent wasn't found. Install Cursor's CLI (curl https://cursor.com/install -fsS | bash), or set its path in Settings.")
-                })?;
-                Ok(Llm::Cursor(Cursor::new(binary, self.cursor_key(), self.setting("cursor_model"))))
-            }
+            Provider::Cursor => Ok(Llm::Cursor(self.cursor()?)),
         }
+    }
+
+    pub fn cursor(&self) -> Result<Cursor> {
+        let path = self.setting("cursor_agent_path");
+        let binary = crate::cursor::find_binary(path.as_deref()).ok_or_else(|| {
+            anyhow!("cursor-agent wasn't found. Install Cursor's CLI (curl https://cursor.com/install -fsS | bash), or set its path in Settings.")
+        })?;
+        Ok(Cursor::new(binary, self.cursor_key(), self.setting("cursor_model")))
     }
 }

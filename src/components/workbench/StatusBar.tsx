@@ -51,17 +51,16 @@ export function StatusBar() {
         )}
       </div>
       <div className="flex items-stretch">
-        {update.status.state === "running" ? (
-          <button className={button} onClick={() => openSettings("updates")} title="Updating PDF Tutor">
-            <Spinner className="size-3.5" />
-            {update.status.step}…
-          </button>
-        ) : (update.check?.behind ?? 0) > 0 || update.status.state === "error" ? (
-          <button className={cn(button, "text-primary hover:text-primary")} onClick={() => openSettings("updates")} title="See what's new">
+        {update.check?.newer && update.dismissed === update.check.latest?.version && update.status.state === "idle" && (
+          <button
+            className={cn(button, "text-primary hover:text-primary")}
+            onClick={() => useApp.setState({ update: { ...useApp.getState().update, dismissed: null } })}
+            title="Show the update"
+          >
             <ArrowUpCircle className="size-3.5" />
-            {update.status.state === "error" ? "Update needs attention" : "Update available"}
+            {update.check.latest?.version} available
           </button>
-        ) : null}
+        )}
         {pdf && <span className={item}>Page {page} of {pdf.numPages}</span>}
         {ocrServer.state === "ready" && (
           <button className={button} onClick={() => api.ocrStop()} title="Qianfan-OCR is in memory (~5 GB) and unloads after 5 idle minutes. Click to unload it now.">
