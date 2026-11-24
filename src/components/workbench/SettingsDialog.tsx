@@ -28,7 +28,7 @@ function UpdatesSection() {
   const update = useApp((s) => s.update);
   const { checkForUpdates, startUpdate } = useApp.getState();
   useEffect(() => {
-    checkForUpdates();
+    checkForUpdates(false, false);
   }, []);
   const { check, checking, checkError, status } = update;
   const latest = check?.latest;

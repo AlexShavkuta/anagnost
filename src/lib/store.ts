@@ -84,7 +84,7 @@ interface Actions {
   deleteNote(id: number): Promise<void>;
   setOcrServer(s: OcrStatus): void;
   /** Ask GitHub for new commits; `quiet` keeps errors out of the UI (the launch check). */
-  checkForUpdates(quiet?: boolean): Promise<void>;
+  checkForUpdates(quiet?: boolean, force?: boolean): Promise<void>;
   startUpdate(): Promise<void>;
   dismissUpdate(): void;
   setUpdateStatus(s: UpdateStatus): void;
@@ -112,6 +112,7 @@ export function ancestors(sections: Section[], s: Section | null): Section[] {
 }
 
 let flashTimer: number | undefined;
+let lastUpdateCheck = 0;
 let viewTimer: number | undefined;
 let scrollSeq = 0;
 
@@ -413,9 +414,12 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
   },
 
-  async checkForUpdates(quiet = false) {
+  async checkForUpdates(quiet = false, force = true) {
     const up = () => get().update;
     if (up().checking) return;
+    // Opening Settings doesn't need to ask GitHub again within a few minutes.
+    if (!force && up().check && Date.now() - lastUpdateCheck < 10 * 60 * 1000) return;
+    lastUpdateCheck = Date.now();
     set({ update: { ...up(), checking: true, checkError: "" } });
     try {
       const [check, status] = await Promise.all([api.checkUpdate(), api.updateStatus()]);
