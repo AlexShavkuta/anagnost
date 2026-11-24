@@ -1,6 +1,6 @@
 [package]
 name = "anagnost"
-version = "0.3.1"
+version = "0.3.2"
 repository = "https://github.com/AlexShavkuta/anagnost"
 description = "Anagnost: an agentic PDF reader and explorer"
 authors = ["you"]
